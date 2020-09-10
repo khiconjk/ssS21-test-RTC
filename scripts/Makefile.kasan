@@ -53,3 +53,4 @@ endif # CONFIG_KASAN_SW_TAGS
 ifneq ($(CONFIG_FRAME_WARN),0)
 CFLAGS_KASAN += -Wno-error=frame-larger-than=
 endif
+export CFLAGS_KASAN CFLAGS_KASAN_NOSANITIZE
