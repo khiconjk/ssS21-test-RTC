@@ -50,7 +50,7 @@ fetch_ksu() {
 
     rm -rf "$PWD/KernelSU-Next"
 
-        echo "Fetching latest KernelSu Next"
+        echo "Fetching latest KernelSU Next"
         git submodule update --init --recursive || {
             echo "Failed to initialize KSU Next submodule!"
             exit 1
@@ -388,9 +388,9 @@ build_zip() {
     DATE=`date +"%d-%m-%Y_%H-%M-%S"`
 
     if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
-        NAME="${version}_${MODEL}_RKSU_SUSFS_OFFICIAL_${DATE}.zip"
+        NAME="${version}_${MODEL}_KSUN_SUSFS_OFFICIAL_${DATE}.zip"
     elif [[ "$KSU_OPTION" == "y" ]]; then
-        NAME="${version}_${MODEL}_RKSU_OFFICIAL_${DATE}.zip"
+        NAME="${version}_${MODEL}_KSUN_OFFICIAL_${DATE}.zip"
     else
         NAME="${version}_${MODEL}_VANILLA_OFFICIAL_${DATE}.zip"
     fi
