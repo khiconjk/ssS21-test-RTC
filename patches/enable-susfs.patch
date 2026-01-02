@@ -1,23 +1,24 @@
-From 0d8361bcec699207f6bfff4926c7b72a621c3d3c Mon Sep 17 00:00:00 2001
+From f87ba9582e4ddbba7fb12efcd36718c5dcd15af1 Mon Sep 17 00:00:00 2001
 From: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
-Date: Fri, 2 Jan 2026 11:37:29 +0800
+Date: Fri, 2 Jan 2026 21:59:25 +0800
 Subject: [PATCH] kernel: patch KSU Next enable SuSFS 2.0.0
 
 Signed-off-by: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
 ---
  kernel/Kbuild            |  12 +++-
- kernel/Kconfig           |  90 +++++++++++++++++++++++
+ kernel/Kconfig           |  98 +++++++++++++++++++++++++
  kernel/kernel_umount.c   |  16 ++++-
+ kernel/kernel_umount.h   |   6 +-
  kernel/ksu.c             |   7 ++
  kernel/selinux/rules.c   |   9 +++
  kernel/selinux/selinux.c |  96 +++++++++++++++++++++++++
  kernel/selinux/selinux.h |  13 ++++
- kernel/setuid_hook.c     |  60 ++++++++++++++++
+ kernel/setuid_hook.c     |  66 +++++++++++++++++
  kernel/supercalls.c      | 151 ++++++++++++++++++++++++++++++++++++---
- 9 files changed, 441 insertions(+), 13 deletions(-)
+ 10 files changed, 459 insertions(+), 15 deletions(-)
 
 diff --git a/kernel/Kbuild b/kernel/Kbuild
-index 1255cb2e..1058b014 100644
+index 1255cb2e..97be2a8d 100644
 --- a/kernel/Kbuild
 +++ b/kernel/Kbuild
 @@ -259,4 +259,14 @@ ccflags-y += -DEXPECTED_MANAGER_SIZE=$(KSU_NEXT_MANAGER_SIZE)
@@ -37,12 +38,11 @@ index 1255cb2e..1058b014 100644
 +$(info -- You have not integrated susfs in your kernel yet.)
 +$(info -- Read: https://gitlab.com/simonpunk/susfs4ksu)
 +endif
-\ No newline at end of file
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index b382a63d..008fbcfc 100644
+index b382a63d..c374f226 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -42,4 +42,94 @@ config KSU_KPROBES_HOOK
+@@ -42,4 +42,102 @@ config KSU_KPROBES_HOOK
  	  Enable KPROBES, KRETPROBES and TRACEPOINT hook for KernelSU core.
  	  This should not be used on kernel below 5.10.
  
@@ -82,6 +82,14 @@ index b382a63d..008fbcfc 100644
 +    help
 +        - Allow spoofing the kstat of user-defined file/directory.
 +        - Effective only on zygote spawned user app process.
++
++config KSU_SUSFS_TRY_UMOUNT
++	bool "Enable to use ksu's try_umount"
++	depends on KSU_SUSFS
++	default y
++	help
++		- Allow using try_umount to umount other user-defined mount paths prior to ksu's default umount paths.
++		- Effective only on zygote spawned umounted user app process.
 +
 +config KSU_SUSFS_SPOOF_UNAME
 +    bool "Enable to spoof uname"
@@ -203,6 +211,23 @@ index e4d1e60c..8da7305e 100644
  
  void ksu_kernel_umount_init(void)
  {
+diff --git a/kernel/kernel_umount.h b/kernel/kernel_umount.h
+index e5448955..623976d9 100644
+--- a/kernel/kernel_umount.h
++++ b/kernel/kernel_umount.h
+@@ -8,8 +8,10 @@
+ void ksu_kernel_umount_init(void);
+ void ksu_kernel_umount_exit(void);
+ 
+-// Handler function to be called from setresuid hook
+-int ksu_handle_umount(uid_t old_uid, uid_t new_uid);
++#if !defined(CONFIG_KSU_SUSFS) || !defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
++ // Handler function to be called from setresuid hook
++ int ksu_handle_umount(uid_t old_uid, uid_t new_uid);
++#endif
+ 
+ // for the umount list
+ struct mount_entry {
 diff --git a/kernel/ksu.c b/kernel/ksu.c
 index 7742dad6..2fc186ac 100644
 --- a/kernel/ksu.c
@@ -375,7 +400,7 @@ index 84fda9d5..528aa5b1 100644
 +
  #endif
 diff --git a/kernel/setuid_hook.c b/kernel/setuid_hook.c
-index e72afd9d..b0b36afb 100644
+index e72afd9d..ca81bceb 100644
 --- a/kernel/setuid_hook.c
 +++ b/kernel/setuid_hook.c
 @@ -27,6 +27,10 @@
@@ -389,7 +414,7 @@ index e72afd9d..b0b36afb 100644
  static bool ksu_enhanced_security_enabled = false;
  
  static int enhanced_security_feature_get(u64 *value)
-@@ -60,6 +64,28 @@ static const struct ksu_feature_handler enhanced_security_handler = {
+@@ -60,6 +64,31 @@ static const struct ksu_feature_handler enhanced_security_handler = {
  
  extern void disable_seccomp(struct task_struct *tsk);
  
@@ -413,12 +438,15 @@ index e72afd9d..b0b36afb 100644
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +extern void susfs_reorder_mnt_id(void);
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
++extern void susfs_try_umount(uid_t uid);
++#endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
  static void ksu_install_manager_fd_tw_func(struct callback_head *cb)
  {
      ksu_install_fd();
-@@ -72,6 +98,18 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+@@ -72,6 +101,18 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
      uid_t new_uid = ruid;
      uid_t old_uid = current_uid().val;
  
@@ -437,11 +465,11 @@ index e72afd9d..b0b36afb 100644
      pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
  
      // if old process is root, ignore it.
-@@ -121,6 +159,11 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+@@ -121,6 +162,11 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
          return 0;
      }
  
-+    // Check if spawned process is normal user app and needs to be umounted
++// Check if spawned process is normal user app and needs to be umounted
 +    if (likely(is_zygote_normal_app_uid(new_uid) && ksu_uid_should_umount(new_uid))) {
 +        goto do_umount;
 +    }
@@ -449,19 +477,21 @@ index e72afd9d..b0b36afb 100644
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
      if (ksu_is_allow_uid_for_current(new_uid)) {
          if (current->seccomp.mode == SECCOMP_MODE_FILTER &&
-@@ -139,9 +182,26 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
- 	}
+@@ -140,7 +186,27 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
  #endif
  
-+    // Handle kernel umount
+     // Handle kernel umount
 +    //ksu_handle_umount(old_uid, new_uid);
 +
 +    return 0;
 +
 +do_umount:
-     // Handle kernel umount
++    // Handle kernel umount
++#ifndef CONFIG_KSU_SUSFS_TRY_UMOUNT
      ksu_handle_umount(old_uid, new_uid);
- 
++#else
++    susfs_try_umount(new_uid);
++#endif // #ifndef CONFIG_KSU_SUSFS_TRY_UMOUNT
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +    // We can reorder the mnt_id now after all sus mounts are umounted
 +    susfs_reorder_mnt_id();
@@ -472,10 +502,9 @@ index e72afd9d..b0b36afb 100644
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 +
 +    susfs_set_current_proc_umounted();
-+
+ 
      return 0;
  }
- 
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
 index ff541ced..a8a5f1ab 100644
 --- a/kernel/supercalls.c
