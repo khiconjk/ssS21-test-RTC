@@ -1,7 +1,7 @@
-From 7fd1cb50d85a3bcf1b0b719ddf45b51b9203e082 Mon Sep 17 00:00:00 2001
+From 543ee262fbe81e4189c2005ec1ecf3f0001e6d5b Mon Sep 17 00:00:00 2001
 From: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
-Date: Sun, 4 Jan 2026 18:42:21 +0800
-Subject: [PATCH] kernel: patch KSU Next enable SuSFS 2.0.0
+Date: Fri, 23 Jan 2026 09:05:25 +0800
+Subject: [PATCH] patch KSU Next enable SuSFS 2.0.0 with de-inlined hooks
 
 Signed-off-by: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
 ---
@@ -14,8 +14,8 @@ Signed-off-by: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
  kernel/selinux/selinux.c |  96 +++++++++++++++++++++++++
  kernel/selinux/selinux.h |  13 ++++
  kernel/setuid_hook.c     |  66 +++++++++++++++++
- kernel/supercalls.c      | 151 ++++++++++++++++++++++++++++++++++++---
- 10 files changed, 458 insertions(+), 14 deletions(-)
+ kernel/supercalls.c      | 152 ++++++++++++++++++++++++++++++++++++---
+ 10 files changed, 459 insertions(+), 14 deletions(-)
 
 diff --git a/kernel/Kbuild b/kernel/Kbuild
 index 3f455e11..90663431 100644
@@ -504,13 +504,13 @@ index 49915092..83af39b6 100644
      return 0;
  }
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
-index ff541ced..a8a5f1ab 100644
+index c7eb13f8..4d7988ae 100644
 --- a/kernel/supercalls.c
 +++ b/kernel/supercalls.c
-@@ -11,6 +11,11 @@
- #include <linux/task_work.h>
+@@ -12,6 +12,11 @@
  #include <linux/uaccess.h>
  #include <linux/version.h>
+ #include <linux/utsname.h> // utsname() and uts_sem
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/namei.h>
 +#include <linux/susfs.h>
@@ -519,7 +519,7 @@ index ff541ced..a8a5f1ab 100644
  
  #include "supercalls.h"
  #include "arch.h"
-@@ -26,6 +31,10 @@
+@@ -27,6 +32,10 @@
  #include "file_wrapper.h"
  #include "syscall_hook_manager.h"
  
@@ -530,7 +530,7 @@ index ff541ced..a8a5f1ab 100644
  #include "tiny_sulog.c"
  
  // Permission check functions
-@@ -118,6 +127,9 @@ static int do_report_event(void __user *arg)
+@@ -119,6 +128,9 @@ static int do_report_event(void __user *arg)
  			boot_complete_lock = true;
  			pr_info("boot_complete triggered\n");
  			on_boot_completed();
@@ -540,7 +540,7 @@ index ff541ced..a8a5f1ab 100644
  		}
  		break;
  	}
-@@ -357,7 +369,6 @@ static int do_get_wrapper_fd(void __user *arg) {
+@@ -358,7 +370,6 @@ static int do_get_wrapper_fd(void __user *arg) {
  
  static int do_manage_mark(void __user *arg)
  {
@@ -548,7 +548,7 @@ index ff541ced..a8a5f1ab 100644
  	struct ksu_manage_mark_cmd cmd;
  	int ret = 0;
  
-@@ -368,6 +379,7 @@ static int do_manage_mark(void __user *arg)
+@@ -369,6 +380,7 @@ static int do_manage_mark(void __user *arg)
  
  	switch (cmd.operation) {
  	case KSU_MARK_GET: {
@@ -556,7 +556,7 @@ index ff541ced..a8a5f1ab 100644
  		// Get task mark status
  		ret = ksu_get_task_mark(cmd.pid);
  		if (ret < 0) {
-@@ -376,8 +388,19 @@ static int do_manage_mark(void __user *arg)
+@@ -377,8 +389,19 @@ static int do_manage_mark(void __user *arg)
  		}
  		cmd.result = (u32)ret;
  		break;
@@ -576,7 +576,7 @@ index ff541ced..a8a5f1ab 100644
  		if (cmd.pid == 0) {
  			ksu_mark_all_process();
  		} else {
-@@ -388,9 +411,15 @@ static int do_manage_mark(void __user *arg)
+@@ -389,9 +412,15 @@ static int do_manage_mark(void __user *arg)
  				return ret;
  			}
  		}
@@ -592,7 +592,7 @@ index ff541ced..a8a5f1ab 100644
  		if (cmd.pid == 0) {
  			ksu_unmark_all_process();
  		} else {
-@@ -401,11 +430,20 @@ static int do_manage_mark(void __user *arg)
+@@ -402,11 +431,20 @@ static int do_manage_mark(void __user *arg)
  				return ret;
  			}
  		}
@@ -613,7 +613,7 @@ index ff541ced..a8a5f1ab 100644
  		break;
  	}
  	default: {
-@@ -419,11 +457,6 @@ static int do_manage_mark(void __user *arg)
+@@ -420,11 +458,6 @@ static int do_manage_mark(void __user *arg)
  	}
  
  	return 0;
@@ -625,16 +625,7 @@ index ff541ced..a8a5f1ab 100644
  }
  
  static int do_get_hook_mode(void __user *arg)
-@@ -676,7 +709,7 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
- 	{ .cmd = 0, .name = NULL, .handler = NULL, .perm_check = NULL } // Sentinel
- };
- 
--#ifdef KSU_KPROBES_HOOK
-+#if defined(KSU_KPROBES_HOOK) && !defined(CONFIG_KSU_SUSFS)
- struct ksu_install_fd_tw {
- 	struct callback_head cb;
- 	int __user *outp;
-@@ -784,6 +817,102 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+@@ -688,6 +721,103 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
  		magic2);
  #endif
  
@@ -734,10 +725,20 @@ index ff541ced..a8a5f1ab 100644
 +        return 0;
 +    }
 +#endif // #ifdef CONFIG_KSU_SUSFS
++
  	// Check if this is a request to install KSU fd
  	if (magic2 == KSU_INSTALL_MAGIC2) {
  		int fd = ksu_install_fd();
-@@ -856,7 +985,7 @@ void ksu_supercalls_init(void)
+@@ -824,7 +954,7 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+ 	return 0;
+ }
+ 
+-#ifdef KSU_KPROBES_HOOK
++#if defined(KSU_KPROBES_HOOK) && !defined(CONFIG_KSU_SUSFS)
+ struct ksu_install_fd_tw {
+ 	struct callback_head cb;
+ 	int __user *outp;
+@@ -875,7 +1005,7 @@ void ksu_supercalls_init(void)
  		pr_info("  %-18s = 0x%08x\n", ksu_ioctl_handlers[i].name, ksu_ioctl_handlers[i].cmd);
  	}
  
@@ -746,7 +747,7 @@ index ff541ced..a8a5f1ab 100644
  	int rc = register_kprobe(&reboot_kp);
  	if (rc) {
  		pr_err("reboot kprobe failed: %d\n", rc);
-@@ -870,9 +999,11 @@ void ksu_supercalls_init(void)
+@@ -889,9 +1019,11 @@ void ksu_supercalls_init(void)
  }
  
  void ksu_supercalls_exit(void){
