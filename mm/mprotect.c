@@ -461,7 +461,6 @@ success:
 
 	change_protection(vma, start, end, vma->vm_page_prot,
 			  dirty_accountable, 0);
-	vm_write_end(vma);
 
 	/*
 	 * Private VM_LOCKED VMA becoming writable: trigger COW to avoid major
