@@ -414,9 +414,6 @@ if [[ "$KSU_OPTION" == "y" ]]; then
 else
 
     refetch_ksu
-
-else
-    refetch_ksu
     
     sed -i "\|$KSU|d" "$KCONFIG_FILE"
     sed -i "\|$MAKEFILE_LINE|d" "$MAKEFILE"

@@ -23,12 +23,7 @@ struct z_erofs_decompressor {
 	 */
 	int (*prepare_destpages)(struct z_erofs_decompress_req *rq,
 				 struct list_head *pagepool);
-<<<<<<< HEAD
-	int (*decompress)(struct z_erofs_decompress_req *rq, u8 *out,
-			  u8 *obase);
-=======
 	int (*decompress)(struct z_erofs_decompress_req *rq, u8 *dst);
->>>>>>> 9bb68a4bbcc4 (BACKPORT: erofs: fix lz4 inplace decompression)
 	char *name;
 };
 
@@ -198,12 +193,7 @@ docopy:
 	return src;
 }
 
-<<<<<<< HEAD
-static int z_erofs_lz4_decompress(struct z_erofs_decompress_req *rq, u8 *out,
-				  u8 *obase)
-=======
 static int z_erofs_lz4_decompress(struct z_erofs_decompress_req *rq, u8 *dst)
->>>>>>> 9bb68a4bbcc4 (BACKPORT: erofs: fix lz4 inplace decompression)
 {
 	unsigned int inputmargin;
 	u8 *out, *headpage, *src;
