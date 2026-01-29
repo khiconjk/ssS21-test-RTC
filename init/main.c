@@ -93,11 +93,8 @@
 #include <linux/cache.h>
 #include <linux/rodata_test.h>
 #include <linux/jump_label.h>
-<<<<<<< HEAD
 #include <linux/mem_encrypt.h>
 #include <linux/memblock.h>
-=======
->>>>>>> 85caed29ae54a53b879298bd76e8308621253bd2
 
 #include <asm/io.h>
 #include <asm/setup.h>

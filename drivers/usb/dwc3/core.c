@@ -1848,7 +1848,6 @@ assert_reset:
 	return ret;
 }
 
-#if 0
 static int dwc3_remove(struct platform_device *pdev)
 {
 	struct dwc3	*dwc = platform_get_drvdata(pdev);
