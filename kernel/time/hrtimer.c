@@ -141,6 +141,11 @@ static struct hrtimer_cpu_base migration_cpu_base = {
 
 #define migration_base	migration_cpu_base.clock_base[0]
 
+																	 
+ 
+								
+ 
+
 /*
  * We are using hashed locking: holding per_cpu(hrtimer_bases)[n].lock
  * means that all timers which are tied to this base via timer->base are
@@ -264,6 +269,11 @@ again:
 }
 
 #else /* CONFIG_SMP */
+
+																	 
+ 
+			  
+ 
 
 static inline struct hrtimer_clock_base *
 lock_hrtimer_base(const struct hrtimer *timer, unsigned long *flags)
@@ -2069,15 +2079,6 @@ int hrtimers_prepare_cpu(unsigned int cpu)
 	}
 
 	cpu_base->cpu = cpu;
-	hrtimer_cpu_base_init_expiry_lock(cpu_base);
-	return 0;
-}
-
-int hrtimers_cpu_starting(unsigned int cpu)
-{
-	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
-
-	/* Clear out any left over state from a CPU down operation */
 	cpu_base->active_bases = 0;
 	cpu_base->hres_active = 0;
 	cpu_base->hang_detected = 0;
@@ -2085,7 +2086,9 @@ int hrtimers_cpu_starting(unsigned int cpu)
 	cpu_base->softirq_next_timer = NULL;
 	cpu_base->expires_next = KTIME_MAX;
 	cpu_base->softirq_expires_next = KTIME_MAX;
-	return 0;
+	hrtimer_cpu_base_init_expiry_lock(cpu_base);
+	restore_pcpu_tick(cpu);
+	return 0;	  
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -2170,7 +2173,7 @@ int hrtimers_dead_cpu(unsigned int scpu)
 void __init hrtimers_init(void)
 {
 	hrtimers_prepare_cpu(smp_processor_id());
-	hrtimers_cpu_starting(smp_processor_id());
+
 	open_softirq(HRTIMER_SOFTIRQ, hrtimer_run_softirq);
 }
 
