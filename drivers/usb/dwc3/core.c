@@ -1762,6 +1762,7 @@ int dwc3_probe(struct platform_device *pdev,
 	dwc3_cache_hwparams(dwc);
 
 	spin_lock_init(&dwc->lock);
+	init_completion(&dwc->disconnect);
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_set_active(dev);
