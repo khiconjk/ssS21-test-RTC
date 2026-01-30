@@ -555,7 +555,7 @@ static struct binder_buffer *binder_alloc_new_buf_locked(
 	buffer->pid = pid;
 	buffer->oneway_spam_suspect = false;
 	if (is_async) {
-		alloc->free_async_space -= size + sizeof(struct binder_buffer);
+		alloc->free_async_space -= size;
         if ((system_server_pid == alloc->pid) && (alloc->free_async_space <= 153600)) { // 150K
             pr_info("%d: [free_size<150K] binder_alloc_buf size %zd async free %zd\n",
                     alloc->pid, size, alloc->free_async_space);
