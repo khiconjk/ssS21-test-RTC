@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-refetch_ksu() {
+fetch_ksu() {
 
     rm -rf "$PWD/KernelSU"
 
@@ -396,8 +396,12 @@ MAKEFILE_LINE='obj-$(CONFIG_KSU) += kernelsu/'
 
 if [[ "$KSU_OPTION" == "y" ]]; then
 
-    if ! grep -Fxq "$KSU" "$KCONFIG_FILE"; then
-        sed -i "\|endmenu|i $KSU" "$KCONFIG_FILE"
+    fetch_ksu
+
+    if [[ "$SUSFS_OPTION" == "y" ]]; then
+        KSU_BRANCH="susfs-rksu-master"
+    else
+        KSU_BRANCH="main"
     fi
 
     git -C KernelSU fetch origin
@@ -413,7 +417,7 @@ if [[ "$KSU_OPTION" == "y" ]]; then
 
 else
 
-    refetch_ksu
+    fetch_ksu
     
     sed -i "\|$KSU|d" "$KCONFIG_FILE"
     sed -i "\|$MAKEFILE_LINE|d" "$MAKEFILE"
