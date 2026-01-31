@@ -534,9 +534,9 @@ index c7eb13f8..4d7988ae 100644
  			boot_complete_lock = true;
  			pr_info("boot_complete triggered\n");
  			on_boot_completed();
-+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-+            susfs_is_boot_completed_triggered = true;
-+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++#ifdef CONFIG_KSU_SUSFS
++            susfs_start_sdcard_monitor_fn();
++#endif // #ifdef CONFIG_KSU_SUSFS
  		}
  		break;
  	}
