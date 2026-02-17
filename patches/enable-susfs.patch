@@ -1,6 +1,6 @@
-From 543ee262fbe81e4189c2005ec1ecf3f0001e6d5b Mon Sep 17 00:00:00 2001
+From 101774259c68825caf6763d8f7a8440c43371c45 Mon Sep 17 00:00:00 2001
 From: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
-Date: Fri, 23 Jan 2026 09:05:25 +0800
+Date: Wed, 18 Feb 2026 00:16:03 +0800
 Subject: [PATCH] patch KSU Next enable SuSFS 2.0.0 with de-inlined hooks
 
 Signed-off-by: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
@@ -10,18 +10,19 @@ Signed-off-by: xfwdrev <74693315+xfwdrev@users.noreply.github.com>
  kernel/kernel_umount.c   |  16 ++++-
  kernel/kernel_umount.h   |   6 +-
  kernel/ksu.c             |   7 ++
+ kernel/ksud.c            | 147 ++++++++++++++++++++++++-------------
  kernel/selinux/rules.c   |   9 +++
  kernel/selinux/selinux.c |  96 +++++++++++++++++++++++++
  kernel/selinux/selinux.h |  13 ++++
  kernel/setuid_hook.c     |  66 +++++++++++++++++
  kernel/supercalls.c      | 152 ++++++++++++++++++++++++++++++++++++---
- 10 files changed, 459 insertions(+), 14 deletions(-)
+ 11 files changed, 556 insertions(+), 64 deletions(-)
 
 diff --git a/kernel/Kbuild b/kernel/Kbuild
-index 3f455e11..90663431 100644
+index 49bde06c..67054e00 100644
 --- a/kernel/Kbuild
 +++ b/kernel/Kbuild
-@@ -262,4 +262,14 @@ ccflags-y += -DEXPECTED_MANAGER_HASH=\"$(KSU_NEXT_MANAGER_HASH)\"
+@@ -261,4 +261,14 @@ ccflags-y += -DEXPECTED_MANAGER_HASH=\"$(KSU_NEXT_MANAGER_HASH)\"
  ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
  ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-unused-variable
  
@@ -251,6 +252,183 @@ index 7742dad6..2fc186ac 100644
  	ksu_ksud_init();
  
  	ksu_file_wrapper_init();
+diff --git a/kernel/ksud.c b/kernel/ksud.c
+index 8861b6ac..812cf084 100644
+--- a/kernel/ksud.c
++++ b/kernel/ksud.c
+@@ -225,17 +225,13 @@ static bool check_argv(struct user_arg_ptr argv, int index,
+ 
+ 	p = get_user_arg_ptr(argv, index);
+ 	if (!p || IS_ERR(p))
+-		goto fail;
++		return false;
+ 
+ 	if (strncpy_from_user_nofault(buf, p, buf_len) <= 0)
+-		goto fail;
++		return false;
+ 
+ 	buf[buf_len - 1] = '\0';
+ 	return !strcmp(buf, expected);
+-
+-fail:
+-	pr_err("check_argv failed\n");
+-	return false;
+ }
+ 
+ // IMPORTANT NOTE: the call from execve_handler_pre WON'T provided correct value for envp and flags in GKI version
+@@ -243,57 +239,108 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
+                              struct user_arg_ptr *argv,
+                              struct user_arg_ptr *envp, int *flags)
+ {
+-    struct filename *filename;
++#ifndef KSU_KPROBES_HOOK
++	if (!ksu_execveat_hook) {
++		return 0;
++	}
++#endif
++	struct filename *filename;
+ 
+-    static const char app_process[] = "/system/bin/app_process";
+-    static bool first_zygote = true;
++	static const char app_process[] = "/system/bin/app_process";
++	static bool first_zygote = true;
+ 
+-    /* This applies to versions Android 10+ */
+-    static const char system_bin_init[] = "/system/bin/init";
+-    static bool init_second_stage_executed = false;
++	/* This applies to versions Android 10+ */
++	static const char system_bin_init[] = "/system/bin/init";
++	/* This applies to versions between Android 6 ~ 9  */
++	static const char old_system_init[] = "/init";
++	static bool init_second_stage_executed = false;
+ 
+-    if (!filename_ptr)
+-        return 0;
++	if (!filename_ptr)
++		return 0;
+ 
+-    filename = *filename_ptr;
+-    if (IS_ERR(filename)) {
+-        return 0;
+-    }
++	filename = *filename_ptr;
++	if (IS_ERR(filename)) {
++		return 0;
++	}
+ 
+-    // https://cs.android.com/android/platform/superproject/+/android-16.0.0_r2:system/core/init/main.cpp;l=77
+-    if (unlikely(!memcmp(filename->name, system_bin_init,
+-                         sizeof(system_bin_init) - 1) &&
+-                 argv)) {
+-        char buf[16];
+-        if (!init_second_stage_executed &&
+-            check_argv(*argv, 1, "second_stage", buf, sizeof(buf))) {
+-            pr_info("/system/bin/init second_stage executed\n");
+-            apply_kernelsu_rules();
+-            setup_ksu_cred();
+-            init_second_stage_executed = true;
+-        }
+-    }
++	if (unlikely(!memcmp(filename->name, system_bin_init,
++				sizeof(system_bin_init) - 1) &&
++			argv)) {
++		char buf[16];
++		if (!init_second_stage_executed &&
++		    check_argv(*argv, 1, "second_stage", buf, sizeof(buf))) {
++			pr_info("/system/bin/init second_stage executed\n");
++			apply_kernelsu_rules();
++			cache_sid();
++			setup_ksu_cred();
++			init_second_stage_executed = true;
++		}
++	} else if (unlikely(!memcmp(filename->name, old_system_init,
++					sizeof(old_system_init) - 1) &&
++				argv)) {
++		char buf[16];
++		if (!init_second_stage_executed &&
++		    check_argv(*argv, 1, "--second-stage", buf, sizeof(buf))) {
++			/* This applies to versions between Android 6 ~ 7 */
++			pr_info("/init second_stage executed\n");
++			apply_kernelsu_rules();
++			setup_ksu_cred();
++			init_second_stage_executed = true;
++		} else if (count(*argv, MAX_ARG_STRINGS) == 1 &&
++			   !init_second_stage_executed && envp) {
++			/* This applies to versions between Android 8 ~ 9  */
++			int envc = count(*envp, MAX_ARG_STRINGS);
++			if (envc > 0) {
++				int n;
++				for (n = 1; n <= envc; n++) {
++					const char __user *p = get_user_arg_ptr(*envp, n);
++					if (!p || IS_ERR(p)) {
++						continue;
++					}
++					char env[256];
++					// Reading environment variable strings from user space
++					if (strncpy_from_user_nofault(env, p, sizeof(env)) < 0)
++						continue;
++					// Parsing environment variable names and values
++					char *env_name = env;
++					char *env_value = strchr(env, '=');
++					if (env_value == NULL)
++						continue;
++					// Replace equal sign with string terminator
++					*env_value = '\0';
++					env_value++;
++					// Check if the environment variable name and value are matching
++					if (!strcmp(env_name, "INIT_SECOND_STAGE") &&
++					    (!strcmp(env_value, "1") ||
++					     !strcmp(env_value, "true"))) {
++						pr_info("/init second_stage executed\n");
++						apply_kernelsu_rules();
++						setup_ksu_cred();
++						init_second_stage_executed = true;
++					}
++				}
++			}
++		}
++	}
+ 
+-    if (unlikely(
+-            first_zygote &&
+-            !memcmp(filename->name, app_process, sizeof(app_process) - 1) &&
+-            argv)) {
+-        char buf[16];
+-        if (check_argv(*argv, 1, "-Xzygote", buf, sizeof(buf))) {
+-            pr_info("exec zygote, /data prepared, second_stage: %d\n",
+-                    init_second_stage_executed);
+-            rcu_read_lock();
+-            struct task_struct *init_task =
+-                rcu_dereference(current->real_parent);
+-            if (init_task)
+-                task_work_add(init_task, &on_post_fs_data_cb, TWA_RESUME);
+-            rcu_read_unlock();
+-            first_zygote = false;
+-            stop_execve_hook();
+-        }
+-    }
++	if (unlikely(first_zygote && !memcmp(filename->name, app_process,
++			     sizeof(app_process) - 1) && argv)) {
++		char buf[16];
++		if (check_argv(*argv, 1, "-Xzygote", buf, sizeof(buf))) {
++			pr_info("exec zygote, /data prepared, second_stage: %d\n",
++				init_second_stage_executed);
++			rcu_read_lock();
++			struct task_struct *init_task =
++				rcu_dereference(current->real_parent);
++			if (init_task)
++				task_work_add(init_task, &on_post_fs_data_cb, TWA_RESUME);
++			rcu_read_unlock();
++			first_zygote = false;
++			stop_execve_hook();
++		}
++	}
+ 
+-    return 0;
++	return 0;
+ }
+ 
+ static ssize_t (*orig_read)(struct file *, char __user *, size_t, loff_t *);
 diff --git a/kernel/selinux/rules.c b/kernel/selinux/rules.c
 index f216fe39..e12b87b3 100644
 --- a/kernel/selinux/rules.c
@@ -272,12 +450,12 @@ index f216fe39..e12b87b3 100644
  }
  
 diff --git a/kernel/selinux/selinux.c b/kernel/selinux/selinux.c
-index 89d46b00..8dd92b4e 100644
+index c5e415f9..a9a56444 100644
 --- a/kernel/selinux/selinux.c
 +++ b/kernel/selinux/selinux.c
-@@ -194,3 +194,99 @@ u32 ksu_get_ksu_file_sid()
-     }
-     return ksu_file_sid;
+@@ -244,3 +244,99 @@ bool is_init(const struct cred *cred)
+ {
+     return is_sid_match(cred, cached_init_sid, INIT_CONTEXT);
  }
 +
 +#ifdef CONFIG_KSU_SUSFS
@@ -376,10 +554,10 @@ index 89d46b00..8dd92b4e 100644
 +}
 +#endif // #ifdef CONFIG_KSU_SUSFS
 diff --git a/kernel/selinux/selinux.h b/kernel/selinux/selinux.h
-index 84fda9d5..528aa5b1 100644
+index 214c964b..9aa718fe 100644
 --- a/kernel/selinux/selinux.h
 +++ b/kernel/selinux/selinux.h
-@@ -60,4 +60,17 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4);
+@@ -62,4 +62,17 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4);
  
  void setup_ksu_cred();
  
@@ -504,7 +682,7 @@ index 49915092..83af39b6 100644
      return 0;
  }
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
-index c7eb13f8..4d7988ae 100644
+index 10f9c5d9..162d3829 100644
 --- a/kernel/supercalls.c
 +++ b/kernel/supercalls.c
 @@ -12,6 +12,11 @@
@@ -747,7 +925,7 @@ index c7eb13f8..4d7988ae 100644
  	int rc = register_kprobe(&reboot_kp);
  	if (rc) {
  		pr_err("reboot kprobe failed: %d\n", rc);
-@@ -889,9 +1019,11 @@ void ksu_supercalls_init(void)
+@@ -888,9 +1018,11 @@ void ksu_supercalls_init(void)
  }
  
  void ksu_supercalls_exit(void){
