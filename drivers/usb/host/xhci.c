@@ -168,6 +168,20 @@ int xhci_halt(struct xhci_hcd *xhci)
 	if (ret) {
 		if (!(xhci->xhc_state & XHCI_STATE_DYING))
 			xhci_warn(xhci, "Host halt failed, %d\n", ret);
+		xhci_info(xhci, "Resetting HCD\n");
+		/* Reset the internal HC memory state and registers. */
+		for (i = 0; i < retry; i++) {
+			ret = xhci_reset(xhci, XHCI_RESET_SHORT_USEC);
+			if (!ret) {
+				xhci_info(xhci, "Reset complete\n");
+				ret = xhci_handshake(&xhci->op_regs->status,
+						STS_HALT, STS_HALT, XHCI_MAX_HALT_USEC);
+				if (!ret)
+					goto out;
+			}
+		}
+		xhci_warn(xhci, "Host halt retry failed, %d\n", ret);
+		usb3_portsc = NULL;
 		return ret;
 	}
 out:
