@@ -62,34 +62,6 @@ jobs:
             branch: rebased-11
             variant: vanilla
     
-          - model: r9s
-            branch: ksun
-            variant: ksu
-          - model: r9s
-            branch: ksun
-            variant: susfs
-    
-          - model: o1s
-            branch: ksun
-            variant: ksu
-          - model: o1s
-            branch: ksun
-            variant: susfs
-    
-          - model: t2s
-            branch: ksun
-            variant: ksu
-          - model: t2s
-            branch: ksun
-            variant: susfs
-    
-          - model: p3s
-            branch: ksun
-            variant: ksu
-          - model: p3s
-            branch: ksun
-            variant: susfs
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
