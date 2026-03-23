@@ -76,16 +76,16 @@ CLANG_DIR=$PWD/toolchain/clang-r574158
 PATH=$CLANG_DIR/bin:$PATH
 
 # Check if toolchain exists
-if [ ! -f "$CLANG_DIR/bin/clang-21" ]; then
+if [ ! -f "$CLANG_DIR/bin/clang-22" ]; then
     echo "-----------------------------------------------"
     echo "Toolchain not found! Downloading..."
     echo "-----------------------------------------------"
     rm -rf $CLANG_DIR
     mkdir -p $CLANG_DIR
     pushd $CLANG_DIR > /dev/null
-    curl -LJOk https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r574158.tar.gz
-    tar xf mirror-goog-main-llvm-toolchain-source-clang-r574158.tar.gz
-    rm mirror-goog-main-llvm-toolchain-source-clang-r574158.tar.gz
+    curl -LJOk https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r584948.tar.gz
+    tar xf mirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz
+    rm mirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz
     echo "Cleaning up..."
     popd > /dev/null
 fi
