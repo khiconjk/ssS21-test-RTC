@@ -2005,7 +2005,7 @@ static int __exynos_ufs_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 			ufs->h_state != H_SUSPEND)
 		PRINT_STATES(ufs);
 
-	if ((!hba->lrb_in_use) && (hba->clk_gating.active_reqs != 1)) {
+	if (!ufshcd_any_tag_in_use(hba) && (hba->clk_gating.active_reqs != 1)) {
 		dev_err(hba->dev, "%s: hba->clk_gating.active_reqs = %d\n",
 				__func__, hba->clk_gating.active_reqs);
 #if IS_ENABLED(CONFIG_SCSI_UFS_TEST_MODE)
