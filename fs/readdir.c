@@ -25,6 +25,7 @@
 #include <asm/unaligned.h>
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#include <linux/susfs.h>
 #include <linux/susfs_def.h>
 extern bool susfs_is_inode_sus_path(struct inode *inode);
 #endif
