@@ -444,7 +444,7 @@ CONFIG_ARM64_PTR_AUTH=y
 #
 # ARMv8.4 architectural features
 #
-CONFIG_ARM64_AMU_EXTN=y
+# CONFIG_ARM64_AMU_EXTN is not set
 # end of ARMv8.4 architectural features
 
 CONFIG_ARM64_SVE=y
