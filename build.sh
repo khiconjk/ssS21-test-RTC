@@ -375,16 +375,38 @@ build_vendor_boot() {
 
 build_zip() {
     echo "-----------------------------------------------"
-    echo "Building zip..."
-    cp build/out/$MODEL/boot.img build/out/$MODEL/zip/files/boot.img
-    cp build/out/$MODEL/vendor_boot.img build/out/$MODEL/zip/files/vendor_boot.img
-    cp build/out/$MODEL/dtbo.img build/out/$MODEL/zip/files/dtbo.img
-    cp build/update-binary build/out/$MODEL/zip/META-INF/com/google/android/update-binary
-    cp build/updater-script build/out/$MODEL/zip/META-INF/com/google/android/updater-script
+    echo "Building AK3 zip..."
+    echo "-----------------------------------------------"
 
-    version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
+    AK3_DIR="$PWD/AnyKernel3"
+    AK3_REPO="https://github.com/xfwdrev/AnyKernel3.git"
+    AK3_BRANCH="t2s"
+
+    if [ ! -d "$AK3_DIR/.git" ]; then
+        echo "AnyKernel3 not found! Cloning ($AK3_BRANCH branch)..."
+        git clone -b "$AK3_BRANCH" "$AK3_REPO" "$AK3_DIR" || abort
+    else
+        echo "AnyKernel3 exists, updating..."
+        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" checkout "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" reset --hard "origin/$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" clean -fd || abort
+    fi
+
+    rm -f "$AK3_DIR/boot.img"
+    rm -f "$AK3_DIR/vendor_boot.img"
+    rm -f "$AK3_DIR/dtbo.img"
+
+    [ -f build/out/$MODEL/boot.img ] && cp build/out/$MODEL/boot.img "$AK3_DIR/"
+    [ -f build/out/$MODEL/dtbo.img ] && cp build/out/$MODEL/dtbo.img "$AK3_DIR/"
+    [ -f build/out/$MODEL/vendor_boot.img ] && cp build/out/$MODEL/vendor_boot.img "$AK3_DIR/"
+
+    [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$AK3_DIR/anykernel.sh"
+
+    pushd "$AK3_DIR" > /dev/null
+
+    version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
     version=${version:1}
-    pushd build/out/$MODEL/zip > /dev/null
     DATE=`date +"%d-%m-%Y_%H-%M-%S"`
 
     if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
@@ -394,7 +416,7 @@ build_zip() {
     else
         NAME="${version}_${MODEL}_VANILLA_OFFICIAL_${DATE}.zip"
     fi
-    zip -r -qq ../"$NAME" .
+    zip -r9 "../build/out/$MODEL/$NAME" * -x ".git*" "README.md" "*placeholder" || abort
     popd > /dev/null
 }
 
