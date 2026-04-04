@@ -275,7 +275,6 @@ build_modules() {
     exynos-pmu-if.ko
     s3c2410_wdt.ko
     exynos-ecc-handler.ko
-    exynos-coresight.ko
     debug-snapshot-qd.ko
     eat.ko
     exynos-adv-tracer-s2d.ko
