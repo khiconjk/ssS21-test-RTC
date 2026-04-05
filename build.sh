@@ -231,7 +231,6 @@ build_modules() {
     # Some of the kernel modules are in /vendor_dlkm or /vendor/lib/modules and not in vendor_boot
     # So we will remove them from the folder and run depmod again to update the files
     FILENAMES="
-    input_booster_lkm.ko
     sec_debug_sched_info.ko
     "
     for FILENAME in $FILENAMES; do
