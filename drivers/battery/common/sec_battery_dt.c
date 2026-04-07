@@ -1026,6 +1026,11 @@ int sec_bat_parse_dt(struct device *dev,
 	if (ret)
 		pr_info("%s : lrp_temp_check_type is Empty\n", __func__);
 
+	if(pdata->lrp_temp_check_type != 0x00) {
+		pr_info("%s : disabling LRP for this board\n", __func__);
+		pdata->lrp_temp_check_type = SEC_BATTERY_TEMP_CHECK_NONE;
+	}
+
 	if (pdata->lrp_temp_check_type) {
 		for (i = 0; i < LRP_MAX; i++) {
 			if (sec_bat_parse_dt_lrp(battery, np, i) < 0) {
