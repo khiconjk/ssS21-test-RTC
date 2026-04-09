@@ -2771,23 +2771,13 @@ static const struct snd_kcontrol_new abox_ext_bin_reload_all_control =
 static int abox_ext_bin_add_controls(struct snd_soc_component *cmpnt,
 		struct abox_extra_firmware *efw)
 {
-	static bool reload_all_added;
-	struct device *dev;
+	struct device *dev = cmpnt->dev;
 	struct snd_kcontrol_new *control, *controls;
 	struct soc_bytes_ext *be;
 	struct soc_mixer_control *mc;
 	char *name;
 	int num_controls = ARRAY_SIZE(abox_ext_bin_controls);
 	int ret;
-
-	if (!cmpnt)
-		return -EINVAL;
-
-	dev = cmpnt->dev;
-
-	if (!reload_all_added)
-		reload_all_added = !snd_soc_add_component_controls(cmpnt,
-				&abox_ext_bin_reload_all_control, 1);
 
 	controls = kmemdup(&abox_ext_bin_controls,
 			sizeof(abox_ext_bin_controls), GFP_KERNEL);
@@ -2832,6 +2822,27 @@ err:
 		kfree_const(control->name);
 	kfree(controls);
 	return ret;
+}
+
+int abox_add_extra_firmware_controls(struct abox_data *data)
+{
+	struct device *dev = data->dev;
+	struct snd_soc_component *cmpnt = data->cmpnt;
+	struct abox_extra_firmware *efw;
+
+	abox_dbg(dev, "%s\n", __func__);
+
+	if (!cmpnt)
+		return -EINVAL;
+
+	snd_soc_add_component_controls(cmpnt, &abox_ext_bin_reload_all_control, 1);
+
+	list_for_each_entry(efw, &data->firmware_extra, list) {
+		if (efw->changeable && efw->firmware)
+			abox_ext_bin_add_controls(cmpnt, efw);
+	}
+
+	return 0;
 }
 
 static struct abox_extra_firmware *abox_get_extra_firmware(
@@ -2906,8 +2917,6 @@ static void abox_request_extra_firmware(struct abox_data *data)
 			continue;
 
 		abox_ext_bin_request(dev, efw);
-		if (efw->changeable && efw->firmware)
-			abox_ext_bin_add_controls(data->cmpnt, efw);
 	}
 }
 
