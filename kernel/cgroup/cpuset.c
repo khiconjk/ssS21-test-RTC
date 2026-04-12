@@ -50,6 +50,7 @@
 #include <linux/sched/deadline.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/task.h>
+#include <linux/binfmts.h>
 #include <linux/seq_file.h>
 #include <linux/security.h>
 #include <linux/slab.h>
@@ -2372,6 +2373,17 @@ static ssize_t cpuset_write_resmask(struct kernfs_open_file *of,
 	struct cpuset *cs = css_cs(of_css(of));
 	struct cpuset *trialcs;
 	int retval = -ENODEV;
+
+	if (task_is_booster(current)) {
+		struct cgroup *cgrp = cs->css.cgroup;
+		char cg_name[64];
+
+		cgroup_name(cgrp, cg_name, sizeof(cg_name));
+
+		if (!strcmp(cg_name, "sf")) {
+			return nbytes;
+		}
+	}
 
 	buf = strstrip(buf);
 
