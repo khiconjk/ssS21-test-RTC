@@ -53,13 +53,9 @@ struct part {
  */
 extern int
 exynos_select_task_rq(struct task_struct *p, int prev_cpu, int sd_flag, int wake_flag);
-extern int ems_select_task_rq_fair(struct task_struct *p, int prev_cpu,
-				   int sd_flag, int wake_flag);
 extern int ems_can_migrate_task(struct task_struct *p, int dst_cpu);
 extern void ems_tick(struct rq *rq);
 extern void lb_newidle_balance(struct rq *dst_rq, void *rf_ptr, int *pulled_task, int *done);
-extern const struct cpumask *ecs_cpus_allowed(struct task_struct *p);
-extern const struct cpumask *emstune_cpus_allowed(struct task_struct *p);
 
 /*
  * multi load

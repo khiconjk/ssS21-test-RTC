@@ -167,6 +167,7 @@ struct ecs_stage {
 };
 
 extern int ecs_init(void);
+extern const struct cpumask *ecs_cpus_allowed(struct task_struct *p);
 extern void ecs_update(void);
 
 /* EMSTune */
@@ -317,6 +318,7 @@ struct emstune_mode {
 
 extern bool emstune_can_migrate_task(struct task_struct *p, int dst_cpu);
 extern int emstune_eff_weight(struct task_struct *p, int cpu, int idle);
+extern const struct cpumask *emstune_cpus_allowed(struct task_struct *p);
 extern int emstune_sched_policy(struct task_struct *p);
 extern int emstune_ontime(struct task_struct *p);
 extern int emstune_tiny_cd_sched(struct task_struct *p);
