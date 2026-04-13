@@ -856,13 +856,6 @@ extern int abox_register_extra_sound_card(struct device *dev,
 		struct snd_soc_card *card, unsigned int idx);
 
 /**
- * add controls for extra firmwares
- * @param[in]	data		pointer to abox_data structure
- * @return	0 or error code
- */
-extern int abox_add_extra_firmware_controls(struct abox_data *data);
-
-/**
  * add or update extra firmware
  * @param[in]	dev		calling device
  * @param[in]	data		pointer to abox_data structure

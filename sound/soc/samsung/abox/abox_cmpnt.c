@@ -6686,7 +6686,6 @@ static int cmpnt_probe(struct snd_soc_component *cmpnt)
 
 	data->cmpnt = cmpnt;
 
-	abox_add_extra_firmware_controls(data);
 	abox_atune_probe(data);
 
 	/* vdma and dump are initialized in abox component probe
