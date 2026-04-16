@@ -35,11 +35,7 @@
  * operation is supplied.
  */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
-#endif
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-struct mount;
-extern int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt);
+extern void susfs_generic_fillattr_spoofer(struct inode *inode, struct kstat *stat);
 #endif
 
 void generic_fillattr(struct inode *inode, struct kstat *stat)
@@ -58,7 +54,7 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
+	susfs_generic_fillattr_spoofer(inode, stat);
 #endif
 }
 EXPORT_SYMBOL(generic_fillattr);
@@ -98,7 +94,7 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 		int err = inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
 		if (!err)
-			susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
+			susfs_generic_fillattr_spoofer(inode, stat);
 		return err;
 	}
 #else
