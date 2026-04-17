@@ -998,6 +998,7 @@
 
 #define COMMON_DISCARDS							\
 	SANITIZER_DISCARDS						\
+	*(.discard.ksym)						\
 	*(.discard)							\
 	*(.discard.*)							\
 	*(.modinfo)							\

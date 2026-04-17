@@ -32,7 +32,13 @@ endif
 
 # We never want expected sections to be placed heuristically by the
 # linker. All sections should be explicitly named in the linker script.
+#
+# GNU ld's orphan warnings are useful here. ld.lld also warns for internal
+# linker tables and some already-handled sections during the kallsyms/final
+# links, which is just noisy on this tree.
+ifneq ($(CONFIG_LD_IS_LLD),y)
 LDFLAGS_vmlinux += $(call ld-option, --orphan-handling=warn)
+endif
 
 ifeq ($(CONFIG_ARM64_USE_LSE_ATOMICS), y)
   ifneq ($(CONFIG_ARM64_LSE_ATOMICS), y)
