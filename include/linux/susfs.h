@@ -16,6 +16,12 @@
 #define SUSFS_VARIANT "GKI"
 #endif
 
+/*********/
+/* MACRO */
+/*********/
+#define getname_safe(name) (name == NULL ? ERR_PTR(-EINVAL) : getname(name))
+#define putname_safe(name) (IS_ERR(name) ? NULL : putname(name))
+
 /********/
 /* ENUM */
 /********/
@@ -26,12 +32,6 @@ enum UID_SCHEME {
 	UID_UMOUNTED_APP_PROC,
 	UID_UMOUNTED_PROC,
 };
-
-/*********/
-/* MACRO */
-/*********/
-#define getname_safe(name) (name == NULL ? ERR_PTR(-EINVAL) : getname(name))
-#define putname_safe(name) (IS_ERR(name) ? NULL : putname(name))
 
 /**********/
 /* STRUCT */
@@ -56,7 +56,7 @@ struct st_susfs_hide_sus_mnts_for_non_su_procs {
 	bool                                    enabled;
 	int                                     err;
 };
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#endif
 
 /* sus_kstat */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -213,6 +213,8 @@ void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 void susfs_add_sus_kstat(void __user **user_info);
 void susfs_update_sus_kstat(void __user **user_info);
+void susfs_generic_fillattr_spoofer(struct inode *inode, struct kstat *stat);
+void susfs_show_map_vma_spoofer(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);
 #endif
 
 /* try_umount */
@@ -241,7 +243,6 @@ int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 /* open_redirect */
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 void susfs_add_open_redirect(void __user **user_info);
-struct filename* susfs_get_redirected_path(unsigned long ino);
 #endif
 
 /* sus_map */
