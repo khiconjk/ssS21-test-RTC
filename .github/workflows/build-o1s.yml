@@ -1,0 +1,50 @@
+name: Build o1s Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - rebased-11
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl wget tar xz-utils zip unzip \
+            build-essential bc bison flex \
+            libssl-dev libelf-dev pahole \
+            python3 python3-pip \
+            cpio lz4 kmod rsync ca-certificates
+
+      - name: Prepare dtconfigs
+        run: |
+          mkdir -p build/dtconfigs
+          cp -af dt.configs/*.cfg build/dtconfigs/
+
+      - name: Build kernel
+        run: |
+          bash build.sh -m o1s -k y -s y -r n
+
+      - name: Show outputs
+        run: |
+          find build/out/o1s -maxdepth 2 -type f | sort || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: o1s-kernel-build
+          path: |
+            build/out/o1s/Image
+            build/out/o1s/*.zip
+            build/out/o1s/*.img
+          if-no-files-found: warn
