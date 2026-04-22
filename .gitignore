@@ -14,3 +14,12 @@
 build/out
 toolchain
 AnyKernel3
+out/
+build/out/
+toolchain/
+AnyKernel3/
+*.img
+*.zip
+*.tar
+*.gz
+*.xz
