@@ -1164,7 +1164,6 @@ static ssize_t camera_ssrm_camera_info_store(struct device *dev,
 		}
 
 		if (index == -1)
-			return -EPERM;
 
 		memcpy(&SsrmCameraInfo[i], per_camera_info, sizeof(struct ssrm_camera_data));
 		memcpy(&SsrmCameraInfoExt, common_info, sizeof(struct ssrm_camera_data_common));
@@ -1179,7 +1178,6 @@ static ssize_t camera_ssrm_camera_info_store(struct device *dev,
 			}
 		}
 		if (index == -1)
-			return -EPERM;
 
 		memcpy(&SsrmCameraInfo[i], per_camera_info, sizeof(struct ssrm_camera_data));
 		memcpy(&SsrmCameraInfoExt, common_info, sizeof(struct ssrm_camera_data_common));

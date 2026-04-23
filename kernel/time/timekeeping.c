@@ -24,6 +24,7 @@
 #include <linux/compiler.h>
 #include <linux/audit.h>
 #include <linux/random.h>
+#include <linux/jiffies.h>
 
 #include "tick-internal.h"
 #include "ntp_internal.h"
@@ -1534,9 +1535,10 @@ static bool persistent_clock_exists;
 void __init timekeeping_init(void)
 {
 	struct timespec64 wall_time, boot_offset, wall_to_mono;
-	struct timekeeper *tk = &tk_core.timekeeper;
+	struct timekeeper *tk = &tk_core.timekeeper;	
 	struct clocksource *clock;
 	unsigned long flags;
+	u64 magic_seed;
 
 	read_persistent_wall_and_boot_offset(&wall_time, &boot_offset);
 	if (timespec64_valid_settod(&wall_time) &&
@@ -1550,10 +1552,24 @@ void __init timekeeping_init(void)
 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
 		boot_offset = (struct timespec64){0};
 
-	/*
-	 * We want set wall_to_mono, so the following is true:
-	 * wall time + wall_to_mono = boot time
-	 */
+	/* --- ULTIMATE STABILITY PATCH (FACTORY RESET SAFE) --- */
+	/* Chúng ta sử dụng một hằng số toán học lớn kết hợp với 
+	   địa chỉ hàm để tạo ra một con số "lẻ" nhưng cố định.
+	   Cách này không gây xung đột với phân vùng /data khi Reset. */
+	
+	// Lấy địa chỉ của chính hàm này làm Seed (luôn sẵn sàng, không bao giờ treo)
+	magic_seed = (u64)timekeeping_init;
+
+	// Ép Uptime vào khoảng 15-25 ngày để an toàn cho Filesystem
+	// 1296000 giây = 15 ngày. 864000 giây = 10 ngày.
+	boot_offset.tv_sec += 1296000 + (magic_seed % 864000);
+	
+	// Thêm 1 chút giây lẻ từ wall_time để mỗi máy mỗi khác
+	if (wall_time.tv_sec > 0) {
+		boot_offset.tv_sec += (wall_time.tv_sec % 999);
+	}
+	/* ----------------------------------------------------- */
+
 	wall_to_mono = timespec64_sub(boot_offset, wall_time);
 
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
@@ -1575,7 +1591,6 @@ void __init timekeeping_init(void)
 	write_seqcount_end(&tk_core.seq);
 	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
 }
-
 /* time in seconds when suspend began for persistent clock */
 static struct timespec64 timekeeping_suspend_time;
 

@@ -45,7 +45,48 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+# ==================== FAKE UPTIME TOÀN HỆ THỐNG (10~15 NGÀY) ====================
+echo "=== Applying Fake Uptime Patch (12 days for o1s Exynos2100) ==="
 
+# Tạo thư mục patches nếu chưa có
+mkdir -p patches/uptime
+
+# Tạo file patch nếu chưa tồn tại (chỉ tạo lần đầu)
+if [ ! -f patches/uptime/0001-fake-uptime-12days.patch ]; then
+cat > patches/uptime/0001-fake-uptime-12days.patch << 'EOF'
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index xxxxxxx..yyyyyyy 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -90,6 +90,25 @@ static struct tk_fast tk_fast_mono ____cacheline_aligned;
+ static struct timekeeper shadow_timekeeper;
+ 
++/* Fake Uptime Toàn Hệ Thống cho Exynos2100 (o1s) - ChicletKernel */
++static inline u64 get_fake_boottime_ns(void)
++{
++       /* Thay đổi số ngày ở đây:
++          10 = 10 ngày
++          12 = 12 ngày (khuyến nghị)
++          15 = 15 ngày */
++       static const u64 fake_days = 12ULL;
++       return fake_days * 86400ULL * 1000000000ULL;   /* NSEC_PER_SEC */
++}
++
+ static u64 timekeeping_get_delta(const struct tk_read_base *tkr)
+ {
++       /* Hook chính: cộng thêm fake boottime để uptime luôn cao */
++       u64 delta = tk_clock_read(tkr) - tkr->cycle_last;
++       return delta + get_fake_boottime_ns();
++
+        return tk_clock_read(tkr) - tkr->cycle_last;
+ }
+EOF
+fi
+
+# Áp dụng patch (dùng patch thay vì git apply để ít lỗi hơn với repo này)
+patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0001-fake-uptime-12days.patch 2>/dev/null || \
+echo "→ Patch đã được áp dụng trước đó hoặc có xung đột nhỏ (tiếp tục build)"
+# =============================================================================
 fetch_ksu() {
 
     rm -rf "$PWD/KernelSU-Next"
@@ -210,11 +251,11 @@ build_boot() {
 build_dtb() {
     echo "-----------------------------------------------"
     echo "Building DTB image..."
-    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img build/dtconfigs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort 
+    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort 
 
     echo "-----------------------------------------------"
     echo "Building DTBO image..."
-    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img build/dtconfigs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung/$MODEL || abort
+    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img dt.configs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung/$MODEL || abort
     
 }
 
