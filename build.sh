@@ -1,61 +1,105 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-abort()
-{
-    cd -
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORES="${CORES:-$(nproc)}"
+MODEL="${MODEL:-}"
+KSU_OPTION="${KSU_OPTION:-}"
+SUSFS_OPTION="${SUSFS_OPTION:-}"
+RECOVERY_OPTION="${RECOVERY_OPTION:-}"
+KSU=""
+SUSFS=""
+RECOVERY=""
+
+log() {
+    echo "-----------------------------------------------"
+    echo "$*"
+    echo "-----------------------------------------------"
+}
+
+abort() {
     echo "-----------------------------------------------"
     echo "Kernel compilation failed! Exiting..."
     echo "-----------------------------------------------"
-    exit -1
+    exit 1
 }
 
-unset_flags()
-{
-    cat << EOF
-Usage: $(basename "$0") [options]
+usage() {
+    cat << 'USAGE_EOF'
+Usage: build.sh [options]
 Options:
-    -m, --model [value]    Specify the model code of the phone
-    -k, --ksu [y/N]        Include KernelSU
+    -m, --model [value]    Specify the model code of the phone: r9s/o1s/t2s/p3s
+    -k, --ksu [y/N]        Include KernelSU Next
     -s, --susfs [y/N]      Include SuSFS
-    -r, --recovery [y/N]   Compile kernel for an Android Recovery																 
-EOF
+    -r, --recovery [y/N]   Compile kernel for an Android Recovery
+USAGE_EOF
+}
+
+retry() {
+    local max=3
+    local delay=5
+    local attempt=1
+
+    until "$@"; do
+        if (( attempt >= max )); then
+            return 1
+        fi
+        echo "Command failed. Retry $attempt/$max in ${delay}s: $*"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --model|-m)
-            MODEL="$2"
-            shift 2
-            ;;
-        --ksu|-k)
-            KSU_OPTION="$2"
-            shift 2
-            ;;
-        --susfs|-s)
-            SUSFS_OPTION="$2"
-            shift 2
-            ;;
-        --recovery|-r)
-            RECOVERY_OPTION="$2"
-            shift 2
-            ;;
-        *)\
-            unset_flags
-            exit 1
-            ;;
+        --model|-m) MODEL="${2:-}"; shift 2 ;;
+        --ksu|-k) KSU_OPTION="${2:-}"; shift 2 ;;
+        --susfs|-s) SUSFS_OPTION="${2:-}"; shift 2 ;;
+        --recovery|-r) RECOVERY_OPTION="${2:-}"; shift 2 ;;
+        *) usage; exit 1 ;;
     esac
 done
-# ==================== FAKE UPTIME TOÀN HỆ THỐNG (10~15 NGÀY) ====================
-echo "=== Applying Fake Uptime Patch (12 days for o1s Exynos2100) ==="
 
-# Tạo thư mục patches nếu chưa có
-mkdir -p patches/uptime
+cd "$ROOT_DIR"
 
-# Tạo file patch nếu chưa tồn tại (chỉ tạo lần đầu)
-if [ ! -f patches/uptime/0001-fake-uptime-12days.patch ]; then
-cat > patches/uptime/0001-fake-uptime-12days.patch << 'EOF'
+if [[ -z "$MODEL" ]]; then
+    usage
+    exit 1
+fi
+
+case "$MODEL" in
+    r9s) BOARD="SRPUG16A010KU" ;;
+    o1s) BOARD="SRPTH19C011KU" ;;
+    t2s) BOARD="SRPTG24B014KU" ;;
+    p3s) BOARD="SRPTH19D013KU" ;;
+    *) usage; exit 1 ;;
+esac
+
+if [[ "$RECOVERY_OPTION" == "y" ]]; then
+    RECOVERY="recovery.config"
+    KSU_OPTION="n"
+    SUSFS_OPTION="n"
+fi
+
+if [[ -z "$KSU_OPTION" ]]; then
+    if [[ -t 0 ]]; then
+        read -r -p "Include KernelSU Next (y/N): " KSU_OPTION
+    else
+        KSU_OPTION="n"
+    fi
+fi
+
+[[ "$KSU_OPTION" == "y" ]] && KSU="ksu.config"
+[[ "$SUSFS_OPTION" == "y" ]] && SUSFS="susfs.config"
+
+apply_fake_uptime_patch() {
+    echo "=== Applying Fake Uptime Patch (12 days for o1s Exynos2100) ==="
+    mkdir -p patches/uptime
+
+    if [[ ! -f patches/uptime/0001-fake-uptime-12days.patch ]]; then
+        cat > patches/uptime/0001-fake-uptime-12days.patch << 'PATCH_EOF'
 diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
-index xxxxxxx..yyyyyyy 100644
 --- a/kernel/time/timekeeping.c
 +++ b/kernel/time/timekeeping.c
 @@ -90,6 +90,25 @@ static struct tk_fast tk_fast_mono ____cacheline_aligned;
@@ -64,440 +108,283 @@ index xxxxxxx..yyyyyyy 100644
 +/* Fake Uptime Toàn Hệ Thống cho Exynos2100 (o1s) - ChicletKernel */
 +static inline u64 get_fake_boottime_ns(void)
 +{
-+       /* Thay đổi số ngày ở đây:
-+          10 = 10 ngày
-+          12 = 12 ngày (khuyến nghị)
-+          15 = 15 ngày */
 +       static const u64 fake_days = 12ULL;
-+       return fake_days * 86400ULL * 1000000000ULL;   /* NSEC_PER_SEC */
++       return fake_days * 86400ULL * 1000000000ULL;
 +}
 +
  static u64 timekeeping_get_delta(const struct tk_read_base *tkr)
  {
-+       /* Hook chính: cộng thêm fake boottime để uptime luôn cao */
 +       u64 delta = tk_clock_read(tkr) - tkr->cycle_last;
 +       return delta + get_fake_boottime_ns();
 +
         return tk_clock_read(tkr) - tkr->cycle_last;
  }
-EOF
-fi
+PATCH_EOF
+    fi
 
-# Áp dụng patch (dùng patch thay vì git apply để ít lỗi hơn với repo này)
-patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0001-fake-uptime-12days.patch 2>/dev/null || \
-echo "→ Patch đã được áp dụng trước đó hoặc có xung đột nhỏ (tiếp tục build)"
-# =============================================================================
+    patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0001-fake-uptime-12days.patch 2>/dev/null || \
+        echo "→ Patch đã được áp dụng trước đó hoặc có xung đột nhỏ (tiếp tục build)"
+}
+
+prepare_toolchain() {
+    CLANG_DIR="$ROOT_DIR/toolchain/clang-r596125"
+    export PATH="$CLANG_DIR/bin:$PATH"
+
+    if [[ ! -x "$CLANG_DIR/bin/clang" && ! -x "$CLANG_DIR/bin/clang-22" ]]; then
+        log "Toolchain not found. Downloading clang-r596125..."
+        rm -rf "$CLANG_DIR"
+        mkdir -p "$CLANG_DIR"
+        pushd "$CLANG_DIR" >/dev/null
+        retry curl -L --retry 3 --retry-delay 5 \
+            -o clang-r596125.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz" || abort
+        tar xf clang-r596125.tar.gz || abort
+        rm -f clang-r596125.tar.gz
+        popd >/dev/null
+    fi
+}
+
 fetch_ksu() {
+    local repo="https://github.com/KernelSU-Next/KernelSU-Next.git"
+    local dir="$ROOT_DIR/KernelSU-Next"
 
-    rm -rf "$PWD/KernelSU-Next"
+    rm -rf "$dir" "$ROOT_DIR/drivers/kernelsu"
+    echo "Fetching latest KernelSU Next without recursive submodules..."
 
-        echo "Fetching latest KernelSU Next"
-        git submodule update --init --recursive || {
-            echo "Failed to initialize KSU Next submodule!"
-            exit 1
-        }
+    retry git clone --depth=1 "$repo" "$dir" || {
+        echo "Failed to clone KernelSU Next!"
+        exit 1
+    }
+
+    if [[ -d "$dir/kernel" ]]; then
+        ln -s ../KernelSU-Next/kernel "$ROOT_DIR/drivers/kernelsu"
+    elif [[ -f "$dir/Kconfig" ]]; then
+        ln -s ../KernelSU-Next "$ROOT_DIR/drivers/kernelsu"
+    else
+        echo "KernelSU Next layout not recognized. Missing kernel/Kconfig."
+        exit 1
+    fi
 }
 
 enable_susfs() {
-
-        echo "Applying SuSFS patch to KernelSU Next..."
-        patch -d "$PWD/KernelSU-Next" -p1 < "$PWD/patches/enable-susfs.patch" || {
-            echo "Failed to apply SuSFS patch!"
-            exit 1
-        }
+    echo "Applying SuSFS patch to KernelSU Next..."
+    patch -d "$ROOT_DIR/KernelSU-Next" -p1 < "$ROOT_DIR/patches/enable-susfs.patch" || {
+        echo "Failed to apply SuSFS patch!"
+        exit 1
+    }
 }
 
-echo "Preparing the build environment..."
+configure_ksu_entries() {
+    local kconfig_file="drivers/Kconfig"
+    local ksu_line='source "drivers/kernelsu/Kconfig"'
+    local makefile="drivers/Makefile"
+    local makefile_line='obj-$(CONFIG_KSU) += kernelsu/'
 
-pushd $(dirname "$0") > /dev/null
-CORES=$(nproc)
+    if [[ "$KSU_OPTION" == "y" ]]; then
+        fetch_ksu
+        [[ "$SUSFS_OPTION" == "y" ]] && enable_susfs
+        grep -Fxq "$ksu_line" "$kconfig_file" || sed -i "\|endmenu|i $ksu_line" "$kconfig_file"
+        grep -Fxq "$makefile_line" "$makefile" || echo "$makefile_line" >> "$makefile"
+    else
+        rm -rf "$ROOT_DIR/KernelSU-Next" "$ROOT_DIR/drivers/kernelsu"
+        sed -i "\|$ksu_line|d" "$kconfig_file"
+        sed -i "\|$makefile_line|d" "$makefile"
+    fi
+}
 
-# Define toolchain variables
-CLANG_DIR=$PWD/toolchain/clang-r596125
-PATH=$CLANG_DIR/bin:$PATH
-
-# Check if toolchain exists
-if [ ! -f "$CLANG_DIR/bin/clang-22" ]; then
-    echo "-----------------------------------------------"
-    echo "Toolchain not found! Downloading..."
-    echo "-----------------------------------------------"
-    rm -rf $CLANG_DIR
-    mkdir -p $CLANG_DIR
-    pushd $CLANG_DIR > /dev/null
-    curl -LJOk https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz
-    tar xf mirror-goog-main-llvm-toolchain-source-clang-r596125.tar.gz
-    rm mirror-goog-main-llvm-toolchain-source-clang-r596125.tar.gz
-    echo "Cleaning up..."
-    popd > /dev/null
-fi
-
-MAKE_ARGS="
-LLVM=1 \
-LLVM_IAS=1 \
-ARCH=arm64 \
-O=out
-"
-
-# Define specific variables
-case $MODEL in
-r9s)
-    BOARD=SRPUG16A010KU
-;;
-o1s)
-    BOARD=SRPTH19C011KU
-;;
-t2s)
-    BOARD=SRPTG24B014KU
-;;
-p3s)
-    BOARD=SRPTH19D013KU
-;;
-*)
-    unset_flags
-    exit
-esac
-
-if [[ "$RECOVERY_OPTION" == "y" ]]; then
-    RECOVERY=recovery.config
-    KSU_OPTION=n
-    SUSFS_OPTION=n
-fi
-
-if [ -z $KSU_OPTION ]; then
-    read -p "Include KernelSU (y/N): " KSU_OPTION
-fi
-
-if [[ "$KSU_OPTION" == "y" ]]; then
-    KSU=ksu.config
-fi
-
-if [[ "$SUSFS_OPTION" == "y" ]]; then
-    SUSFS=susfs.config
-fi
-
-rm -rf build/out/$MODEL
-mkdir -p build/out/$MODEL/zip/files
-mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
+MAKE_ARGS=(LLVM=1 LLVM_IAS=1 ARCH=arm64 O=out)
 
 build_kernel() {
-    # Build kernel image
-    echo "-----------------------------------------------"
-    echo "Defconfig: "$KERNEL_DEFCONFIG""
+    log "Build config"
+    echo "Model: $MODEL"
+    echo "Board: $BOARD"
+    echo "KSU: ${KSU:-N}"
+    echo "SUSFS: ${SUSFS:-N}"
+    echo "Recovery: ${RECOVERY:-N}"
+    echo "Cores: $CORES"
 
-    if [[ "$RECOVERY_OPTION" == "y" ]]; then
-        RECOVERY=recovery.config
-        KSU_OPTION=n
-        SUSFS_OPTION=n
-    fi
-    if [ -z "$KSU" ]; then
-        echo "KSU: N"
-    else
-        echo "KSU: $KSU"
-    fi
-    if [ -z "$SUSFS" ]; then
-        echo "SUSFS: N"
-    else
-        echo "SUSFS: $SUSFS"
-    fi
-    if [ -z "$RECOVERY" ]; then
-    echo "Recovery: N"
-    else
-        echo "Recovery: Y"
-    fi
+    log "Generating configuration file"
+    make "${MAKE_ARGS[@]}" -j"$CORES" exynos2100_defconfig "$MODEL.config" ${RECOVERY:+$RECOVERY} ${KSU:+$KSU} ${SUSFS:+$SUSFS} || abort
 
-    echo "-----------------------------------------------"
-    echo "Building kernel using "$KERNEL_DEFCONFIG""
-    echo "Generating configuration file..."
-    echo "-----------------------------------------------"
-    make ${MAKE_ARGS} -j$CORES exynos2100_defconfig $MODEL.config $RECOVERY $KSU $SUSFS || abort
-
-    echo "Building kernel..."
-    echo "-----------------------------------------------"
-    make ${MAKE_ARGS} -j$CORES || abort
+    log "Building kernel"
+    make "${MAKE_ARGS[@]}" -j"$CORES" || abort
 }
 
 build_boot() {
+    cp -a out/arch/arm64/boot/Image "build/out/$MODEL/"
+    [[ -n "$RECOVERY" ]] && return 0
 
-    cp -a out/arch/arm64/boot/Image build/out/$MODEL
+    log "Building boot.img RAMDisk"
+    rm -rf "build/out/$MODEL/boot_ramdisk00"
+    cp -a build/ramdisk/boot/boot_ramdisk00 "build/out/$MODEL/"
 
-    if [ -z "$RECOVERY" ]; then			   
-    echo "-----------------------------------------------"
-    echo "Building boot.img RAMDisk..."
-    mkdir -p build/out/$MODEL/boot_ramdisk00
-
-    # Copy common files for boot.img's RAMDisk
-    cp -a build/ramdisk/boot/boot_ramdisk00 build/out/$MODEL
-
-    pushd build/out/$MODEL/boot_ramdisk00 > /dev/null
+    pushd "build/out/$MODEL/boot_ramdisk00" >/dev/null
     find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | lz4 -l > ../boot_ramdisk || abort
-    popd > /dev/null
+    popd >/dev/null
 
-    echo "-----------------------------------------------"
-    echo "Building boot.img..."
-
-    OUTPUT_FILE=build/out/$MODEL/boot.img
-    RAMDISK_00=build/out/$MODEL/boot_ramdisk
-    KERNEL=build/out/$MODEL/Image
-    HEADER_VERSION=3
-    OS_VERSION=16.0.0
-    OS_PATCH_LEVEL=2025-11
-    CMDLINE="androidboot.selinux=permissive loop.max_part=7"
-
-	python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --cmdline "$CMDLINE" --ramdisk $RAMDISK_00 \
-	--os_version $OS_VERSION --os_patch_level $OS_PATCH_LEVEL --kernel $KERNEL --output $OUTPUT_FILE || abort
-	fi  
+    log "Building boot.img"
+    python3 toolchain/mkbootimg/mkbootimg.py \
+        --header_version 3 \
+        --cmdline "androidboot.selinux=permissive loop.max_part=7" \
+        --ramdisk "build/out/$MODEL/boot_ramdisk" \
+        --os_version 16.0.0 \
+        --os_patch_level 2025-11 \
+        --kernel "build/out/$MODEL/Image" \
+        --output "build/out/$MODEL/boot.img" || abort
 }
 
 build_dtb() {
-    echo "-----------------------------------------------"
-    echo "Building DTB image..."
-    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort 
+    log "Building DTB image"
+    ./toolchain/mkdtimg cfg_create "build/out/$MODEL/dtb.img" dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort
 
-    echo "-----------------------------------------------"
-    echo "Building DTBO image..."
-    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img dt.configs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung/$MODEL || abort
-    
+    log "Building DTBO image"
+    ./toolchain/mkdtimg cfg_create "build/out/$MODEL/dtbo.img" "dt.configs/$MODEL.cfg" -d "out/arch/arm64/boot/dts/samsung/$MODEL" || abort
 }
 
 build_modules() {
-    MODULES_FOLDER=modules
-    rm -rf out/$MODULES_FOLDER
+    local modules_folder="modules"
+    local kernel_dir_path
+    local kernel_version
+    local remove_modules=(sec_debug_sched_info.ko)
 
-    echo "-----------------------------------------------"
-    echo "Building modules..."
-    # Strip modules and place them in modules folder
-    make ${MAKE_ARGS} INSTALL_MOD_PATH=$MODULES_FOLDER INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
+    rm -rf "out/$modules_folder"
+    log "Building modules"
+    make "${MAKE_ARGS[@]}" INSTALL_MOD_PATH="$modules_folder" INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
 
-    # List of kernel modules to remove
-    # Some of the kernel modules are in /vendor_dlkm or /vendor/lib/modules and not in vendor_boot
-    # So we will remove them from the folder and run depmod again to update the files
-    FILENAMES="
-    sec_debug_sched_info.ko
-    "
-    for FILENAME in $FILENAMES; do
-        FILE=$(find out/$MODULES_FOLDER -type f -name "$FILENAME")
-        echo "$FILE" | xargs rm -f
+    for filename in "${remove_modules[@]}"; do
+        find "out/$modules_folder" -type f -name "$filename" -delete
     done
 
-    # Now we run depmod to update the dep/softdep files
-    # For this we need the kernel version
-    KERNEL_DIR_PATH=$(find "out/$MODULES_FOLDER/lib/modules" -maxdepth 1 -type d -name "5.4*") || abort
-    KERNEL_VERSION=$(basename $KERNEL_DIR_PATH) || abort
+    kernel_dir_path="$(find "out/$modules_folder/lib/modules" -maxdepth 1 -type d -name "5.4*" | head -n1)"
+    [[ -n "$kernel_dir_path" ]] || abort
+    kernel_version="$(basename "$kernel_dir_path")"
 
-    # And finally depmod itself
-    depmod -a -b out/$MODULES_FOLDER $KERNEL_VERSION || abort
+    depmod -a -b "out/$modules_folder" "$kernel_version" || abort
+    sed -i 's/.*\///g' "$kernel_dir_path/modules.order"
 
-    # depmod updates modules.alias, modules.dep and modules.softdep
-    # But the module order is not updated by depmod
-    # We have to remove the filenames ourselves
-    # But first, our vendor_boot needs modules.order definitions that go like:
-    # fingerprint.ko
-    # Clang generates modules.order definitions like this
-    # kernel/drivers/fingerprint/fingerprint.ko
-    # So we sed the file to adapt
-    sed -i 's/.*\///g' $KERNEL_DIR_PATH/modules.order 
-
-    # Now we sed the bad filenames out of the file with a loop
-    for FILENAME in $FILENAMES; do
-        sed -i "/$FILENAME/d" "$KERNEL_DIR_PATH/modules.order"
+    for filename in "${remove_modules[@]}"; do
+        sed -i "/$filename/d" "$kernel_dir_path/modules.order"
     done
 
-    # Now we have to order the modules
-    # These files have to be at the top of modules.order in this order, and then we can keep the default order.
-    # Samsung wants the file to be renamed to modules.load anyways, so we will craft our own modules.load file based on modules.order
-    touch $KERNEL_DIR_PATH/modules.load
+    : > "$kernel_dir_path/modules.load"
 
-    INITIAL_ORDER="
-    dss.ko
-    exynos-chipid_v2.ko
-    exynos-reboot.ko
-    exynos2100-itmon.ko
-    exynos-pmu-if.ko
-    s3c2410_wdt.ko
-    exynos-ecc-handler.ko
-    debug-snapshot-qd.ko
-    eat.ko
-    exynos-adv-tracer-s2d.ko
-    ehld.ko
-    exynos-debug-test.ko
-    hardlockup-debug.ko
-    exynos_acpm.ko
-    exynos_pm_qos.ko
-    exynos-s2mpu.ko
-    exynos-pd_el3.ko
-    ect_parser.ko
-    cmupmucal.ko
-    clk_exynos.ko
-    clk-exynos-audss.ko
-    exynos_mct.ko
-    pinctrl-samsung-core.ko
-    exynos-cpupm.ko
-    i2c-exynos5.ko
-    acpm-mfd-bus.ko
-    s2mps24_mfd.ko
-    s2mps23_mfd.ko
-    pmic_class.ko
-    s2mps23-regulator.ko
-    s2mps24-regulator.ko
-    phy-exynos-usbdrd-super.ko
-    sec_debug_mode.ko
-    fingerprint.ko
-    "
+    local initial_order=(
+        dss.ko exynos-chipid_v2.ko exynos-reboot.ko exynos2100-itmon.ko
+        exynos-pmu-if.ko s3c2410_wdt.ko exynos-ecc-handler.ko debug-snapshot-qd.ko
+        eat.ko exynos-adv-tracer-s2d.ko ehld.ko exynos-debug-test.ko hardlockup-debug.ko
+        exynos_acpm.ko exynos_pm_qos.ko exynos-s2mpu.ko exynos-pd_el3.ko ect_parser.ko
+        cmupmucal.ko clk_exynos.ko clk-exynos-audss.ko exynos_mct.ko pinctrl-samsung-core.ko
+        exynos-cpupm.ko i2c-exynos5.ko acpm-mfd-bus.ko s2mps24_mfd.ko s2mps23_mfd.ko
+        pmic_class.ko s2mps23-regulator.ko s2mps24-regulator.ko phy-exynos-usbdrd-super.ko
+        sec_debug_mode.ko fingerprint.ko
+    )
 
-    # First we add the order from Samsung into our new modules.load
-    # And we sed it out of modules.order
-    for LINE in $INITIAL_ORDER; do
-        echo $LINE >> $KERNEL_DIR_PATH/modules.load
-        sed -i "/$LINE/d" "$KERNEL_DIR_PATH/modules.order"
+    for module in "${initial_order[@]}"; do
+        echo "$module" >> "$kernel_dir_path/modules.load"
+        sed -i "/^$module$/d" "$kernel_dir_path/modules.order"
     done
 
-    # Now we add the remaining lines from modules.order into modules.load
-    while IFS= read -r line; do
-        echo "$line" >> "$KERNEL_DIR_PATH/modules.load"
-    done < "$KERNEL_DIR_PATH/modules.order"
+    cat "$kernel_dir_path/modules.order" >> "$kernel_dir_path/modules.load"
+    sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$kernel_dir_path/modules.dep"
 
-    # Now we have to also modify modules.dep
-    # Android generates them like this
-    # kernel/drivers/dma/samsung-dma.ko: kernel/drivers/dma/pl330.ko
-    # But Samsung wants them like this
-    # /lib/modules/samsung-dma.ko: /lib/modules/pl330.ko
-    # So we will format it with sed
-    sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$KERNEL_DIR_PATH/modules.dep"
-
-    # Now the modules and their configuration descriptor files are ready, we move them to a folder and create the new second ramdisk
-    # The second ramdisk should contain a /lib/modules where the modules are located
-    mkdir -p build/out/$MODEL/modules/lib/modules
-
-    find $KERNEL_DIR_PATH -name '*.ko' -exec cp '{}' build/out/$MODEL/modules/lib/modules ';'
-
-    # We also copy the module configuration descriptors
-    cp $KERNEL_DIR_PATH/modules.{alias,dep,softdep,load} build/out/$MODEL/modules/lib/modules
+    mkdir -p "build/out/$MODEL/modules/lib/modules"
+    find "$kernel_dir_path" -name '*.ko' -exec cp '{}' "build/out/$MODEL/modules/lib/modules" ';'
+    cp "$kernel_dir_path"/modules.{alias,dep,softdep,load} "build/out/$MODEL/modules/lib/modules/"
 }
 
 build_vendor_boot() {
-    echo "-----------------------------------------------"
-    echo "Building vendor_boot RAMDisks..."
-    # Copy common vendor_ramdisk00 files to build/out
-    cp -a build/ramdisk/vendor_boot/ramdisk00 build/out/$MODEL/vendor_ramdisk00
+    log "Building vendor_boot RAMDisks"
+    rm -rf "build/out/$MODEL/vendor_ramdisk00"
+    cp -a build/ramdisk/vendor_boot/ramdisk00 "build/out/$MODEL/vendor_ramdisk00"
+    cp -a "build/out/$MODEL/modules/lib/"* "build/out/$MODEL/vendor_ramdisk00/lib/"
+    cp -a "build/ramdisk/vendor_boot/vendor_firmware/$MODEL/"* "build/out/$MODEL/vendor_ramdisk00/"
 
-    # Copy module files for vendor_ramdisk00
-    cp -a build/out/$MODEL/modules/lib/* build/out/$MODEL/vendor_ramdisk00/lib
+    pushd "build/out/$MODEL/vendor_ramdisk00" >/dev/null
+    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../vendor_ramdisk || abort
+    popd >/dev/null
 
-    # Copy device firmware files for vendor_ramdisk00
-    cp -a build/ramdisk/vendor_boot/vendor_firmware/$MODEL/* build/out/$MODEL/vendor_ramdisk00
-
-    # Pack RAMDisks
-    # vendor_ramdisk == ramdisk00
-    pushd build/out/$MODEL/vendor_ramdisk00 > /dev/null
-    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../$MODEl/vendor_ramdisk || abort
-    popd > /dev/null
-
-    echo "-----------------------------------------------"
-    echo "Building vendor_boot image..."
-
-    OUTPUT_FILE=build/out/$MODEL/vendor_boot.img
-    DTB_PATH=build/out/$MODEL/dtb.img
-    RAMDISK_00=build/out/$MODEL/vendor_ramdisk
-    HEADER_VERSION=3
-    BASE=0x00000000
-    PAGESIZE=0x00001000
-    KERNEL_OFFSET=0x80008000
-    RAMDISK_OFFSET=0x84000000
-    TAGS_OFFSET=0x80000000
-    DTB_OFFSET=0x0000000081F00000
-    CMDLINE="androidboot.selinux=permissive loop.max_part=7"
-
-    python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --pagesize $PAGESIZE --base $BASE --kernel_offset $KERNEL_OFFSET \
-	--ramdisk_offset $RAMDISK_OFFSET --tags_offset $TAGS_OFFSET --dtb_offset $DTB_OFFSET --vendor_cmdline "$CMDLINE" --board $BOARD --dtb $DTB_PATH  \
-	--vendor_ramdisk $RAMDISK_00 --vendor_boot $OUTPUT_FILE || abort
+    log "Building vendor_boot image"
+    python3 toolchain/mkbootimg/mkbootimg.py \
+        --header_version 3 \
+        --pagesize 0x00001000 \
+        --base 0x00000000 \
+        --kernel_offset 0x80008000 \
+        --ramdisk_offset 0x84000000 \
+        --tags_offset 0x80000000 \
+        --dtb_offset 0x0000000081F00000 \
+        --vendor_cmdline "androidboot.selinux=permissive loop.max_part=7" \
+        --board "$BOARD" \
+        --dtb "build/out/$MODEL/dtb.img" \
+        --vendor_ramdisk "build/out/$MODEL/vendor_ramdisk" \
+        --vendor_boot "build/out/$MODEL/vendor_boot.img" || abort
 }
 
 build_zip() {
-    echo "-----------------------------------------------"
-    echo "Building AK3 zip..."
-    echo "-----------------------------------------------"
+    log "Building AK3 zip"
+    local ak3_dir="$ROOT_DIR/AnyKernel3"
+    local ak3_repo="https://github.com/xfwdrev/AnyKernel3.git"
+    local ak3_branch="t2s"
 
-    AK3_DIR="$PWD/AnyKernel3"
-    AK3_REPO="https://github.com/xfwdrev/AnyKernel3.git"
-    AK3_BRANCH="t2s"
-
-    if [ ! -d "$AK3_DIR/.git" ]; then
-        echo "AnyKernel3 not found! Cloning ($AK3_BRANCH branch)..."
-        git clone -b "$AK3_BRANCH" "$AK3_REPO" "$AK3_DIR" || abort
+    if [[ ! -d "$ak3_dir/.git" ]]; then
+        echo "AnyKernel3 not found. Cloning $ak3_branch branch..."
+        retry git clone --depth=1 -b "$ak3_branch" "$ak3_repo" "$ak3_dir" || abort
     else
-        echo "AnyKernel3 exists, updating..."
-        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" checkout "$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" reset --hard "origin/$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" clean -fd || abort
+        echo "AnyKernel3 exists. Updating..."
+        retry git -C "$ak3_dir" fetch --depth=1 origin "$ak3_branch" || abort
+        git -C "$ak3_dir" checkout "$ak3_branch" || abort
+        git -C "$ak3_dir" reset --hard "origin/$ak3_branch" || abort
+        git -C "$ak3_dir" clean -fd || abort
     fi
 
-    rm -f "$AK3_DIR/boot.img"
-    rm -f "$AK3_DIR/vendor_boot.img"
-    rm -f "$AK3_DIR/dtbo.img"
+    rm -f "$ak3_dir/boot.img" "$ak3_dir/vendor_boot.img" "$ak3_dir/dtbo.img"
+    [[ -f "build/out/$MODEL/boot.img" ]] && cp "build/out/$MODEL/boot.img" "$ak3_dir/"
+    [[ -f "build/out/$MODEL/dtbo.img" ]] && cp "build/out/$MODEL/dtbo.img" "$ak3_dir/"
+    [[ -f "build/out/$MODEL/vendor_boot.img" ]] && cp "build/out/$MODEL/vendor_boot.img" "$ak3_dir/"
 
-    [ -f build/out/$MODEL/boot.img ] && cp build/out/$MODEL/boot.img "$AK3_DIR/"
-    [ -f build/out/$MODEL/dtbo.img ] && cp build/out/$MODEL/dtbo.img "$AK3_DIR/"
-    [ -f build/out/$MODEL/vendor_boot.img ] && cp build/out/$MODEL/vendor_boot.img "$AK3_DIR/"
+    [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$ak3_dir/anykernel.sh"
 
-    [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$AK3_DIR/anykernel.sh"
+    pushd "$ak3_dir" >/dev/null
+    local version
+    local date_stamp
+    local name
 
-    pushd "$AK3_DIR" > /dev/null
-
-    version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
-    version=${version:1}
-    DATE=`date +"%d-%m-%Y_%H-%M-%S"`
+    version="$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2 || true)"
+    version="${version#-}"
+    [[ -n "$version" ]] || version="ChicletKernel"
+    date_stamp="$(date +"%d-%m-%Y_%H-%M-%S")"
 
     if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
-        NAME="${version}_${MODEL}_KSUN_SUSFS_OFFICIAL_${DATE}.zip"
+        name="${version}_${MODEL}_KSUN_SUSFS_OFFICIAL_${date_stamp}.zip"
     elif [[ "$KSU_OPTION" == "y" ]]; then
-        NAME="${version}_${MODEL}_KSUN_OFFICIAL_${DATE}.zip"
+        name="${version}_${MODEL}_KSUN_OFFICIAL_${date_stamp}.zip"
     else
-        NAME="${version}_${MODEL}_VANILLA_OFFICIAL_${DATE}.zip"
+        name="${version}_${MODEL}_VANILLA_OFFICIAL_${date_stamp}.zip"
     fi
-    zip -r9 "../build/out/$MODEL/$NAME" * -x ".git*" "README.md" "*placeholder" || abort
-    popd > /dev/null
+
+    zip -r9 "../build/out/$MODEL/$name" . -x ".git*" "README.md" "*placeholder" || abort
+    popd >/dev/null
 }
 
-KCONFIG_FILE="drivers/Kconfig"
-KSU='source "drivers/kernelsu/Kconfig"'
-MAKEFILE="drivers/Makefile"
-MAKEFILE_LINE='obj-$(CONFIG_KSU) += kernelsu/'
+main() {
+    log "Preparing the build environment"
+    apply_fake_uptime_patch
+    prepare_toolchain
+    configure_ksu_entries
 
-if [[ "$KSU_OPTION" == "y" ]]; then
+    rm -rf "build/out/$MODEL"
+    mkdir -p "build/out/$MODEL/zip/files" "build/out/$MODEL/zip/META-INF/com/google/android"
 
-    fetch_ksu
+    build_kernel
+    build_boot
+    build_dtb
+    build_modules
 
-    if [[ "$SUSFS_OPTION" == "y" ]]; then
-    enable_susfs
+    if [[ -z "$RECOVERY" ]]; then
+        build_vendor_boot
+        build_zip
     fi
 
-    if ! grep -Fxq "$KSU" "$KCONFIG_FILE"; then
-        sed -i "\|endmenu|i $KSU" "$KCONFIG_FILE"
-    fi
+    log "Build finished successfully"
+}
 
-    if ! grep -Fxq "$MAKEFILE_LINE" "$MAKEFILE"; then
-        echo "$MAKEFILE_LINE" >> "$MAKEFILE"
-    fi
-
-else
-
-    fetch_ksu
-    
-    sed -i "\|$KSU|d" "$KCONFIG_FILE"
-    sed -i "\|$MAKEFILE_LINE|d" "$MAKEFILE"
-fi
-
-build_kernel
-build_boot
-build_dtb
-build_modules
-
-if [ -z "$RECOVERY" ]; then				   
-build_vendor_boot
-build_zip
-fi 
-
-popd > /dev/null
-echo "-----------------------------------------------"
-echo "Build finished successfully!"
+main "$@"
