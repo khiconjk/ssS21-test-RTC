@@ -4,3 +4,6 @@
 [submodule "KernelSU-Next"]
 	path = KernelSU-Next
 	url = https://github.com/KernelSU-Next/KernelSU-Next.git
+[submodule "clang"]
+	path = clang
+	url = https://github.com/ten-repo/clang.git
