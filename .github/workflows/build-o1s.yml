@@ -30,7 +30,13 @@ jobs:
         run: |
           mkdir -p build/dtconfigs
           cp -af dt.configs/*.cfg build/dtconfigs/
-
+          
+      - name: Clone mkbootimg
+        run: |
+         mkdir -p toolchain
+         rm -rf toolchain/mkbootimg
+         git clone https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
+         
       - name: Build kernel
         run: |
           bash build.sh -m o1s -k y -s y -r n
