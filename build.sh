@@ -92,7 +92,7 @@ fetch_ksu() {
     rm -rf "$PWD/KernelSU-Next"
 
         echo "Fetching latest KernelSU Next"
-        git submodule update --init --recursive || {
+        git submodule update --init KernelSU-Next || {
             echo "Failed to initialize KSU Next submodule!"
             exit 1
         }
