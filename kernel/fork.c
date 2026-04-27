@@ -2301,6 +2301,32 @@ static __latent_entropy struct task_struct *copy_process(
 	p->start_time = ktime_get_ns();
 	p->real_start_time = ktime_get_boottime_ns();
 
+	/* --- GHOST UPTIME SYNC: BULLETPROOF FIX --- */
+	{
+		extern u64 arch_sys_boot_offset;
+		
+		if (arch_sys_boot_offset) {
+			/* 1. Bắt đích danh PID 1. Không dùng tên p->comm để tránh sập Scheduler do Fork Inheritance. */
+			if (p->pid == 1) {
+				p->start_time = 0;
+				p->real_start_time = 0;
+			} 
+			/* 2. Dành cho các tiến trình hệ thống lõi khác sinh ra trong 3 phút đầu */
+			else if ((p->start_time > (arch_sys_boot_offset - 10000000000ULL)) && 
+			         (p->start_time < (arch_sys_boot_offset + 180000000000ULL))) {
+				
+				if (p->start_time >= arch_sys_boot_offset) {
+					p->start_time -= arch_sys_boot_offset;
+					p->real_start_time -= arch_sys_boot_offset;
+				} else {
+					p->start_time = 0;
+					p->real_start_time = 0;
+				}
+			}
+		}
+	}
+	/* ------------------------------------------ */
+
 	/*
 	 * Make it visible to the rest of the system, but dont wake it up yet.
 	 * Need tasklist lock for parent etc handling!
