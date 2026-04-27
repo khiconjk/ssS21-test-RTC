@@ -125,7 +125,7 @@ if [ ! -d "$CLANG_DIR" ] || [ -z "$(ls -A $CLANG_DIR/bin 2>/dev/null)" ]; then
     mkdir -p toolchain
     cd toolchain
 
-    wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r596125.tar.gz" -O clang.tar.gz
+    wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
     mkdir clang-r596125
     tar -xf clang.tar.gz -C clang-r596125
 
