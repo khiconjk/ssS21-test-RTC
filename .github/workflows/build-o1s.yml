@@ -39,12 +39,17 @@ jobs:
          
       - name: Build kernel
         run: |
-          bash build.sh -m o1s -k y -s y -r n
+          bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
       - name: Show outputs
         run: |
           find build/out/o1s -maxdepth 2 -type f | sort || true
-
+          
+      - name: Show real errors
+        if: failure()
+        run: |
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED" build.log | head -80 || true
+          
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
