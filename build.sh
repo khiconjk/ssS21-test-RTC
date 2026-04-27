@@ -116,6 +116,15 @@ CORES=$(nproc)
 CLANG_DIR=$PWD/toolchain/clang-r596125
 export PATH=$CLANG_DIR/bin:$PATH
 
+# --- FAKE STOCK SAMSUNG KERNEL & BYPASS UPTIME ---
+touch .scmversion
+export LOCALVERSION=""
+export KBUILD_BUILD_USER="dpi"
+export KBUILD_BUILD_HOST="SWDD7012"
+export KBUILD_BUILD_TIMESTAMP="Wed Apr 01 15:30:00 KST 2026"
+export KBUILD_BUILD_VERSION="1"
+# -------------------------------------------------
+
 # Check toolchain tồn tại
 if [ ! -d "$CLANG_DIR" ] || [ -z "$(ls -A $CLANG_DIR/bin 2>/dev/null)" ]; then
     echo "-----------------------------------------------"
