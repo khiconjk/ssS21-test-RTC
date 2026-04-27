@@ -46,9 +46,12 @@ jobs:
           find build/out/o1s -maxdepth 2 -type f | sort || true
           
       - name: Show real errors
-        if: failure()
+        if: always()
         run: |
-          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED" build.log | head -80 || true
+          echo "===== ERROR LINES ====="
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED" build.log | head -100 || true
+          echo "===== LAST 200 LINES ====="
+          tail -200 build.log || true
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
