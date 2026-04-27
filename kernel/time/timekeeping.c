@@ -1552,29 +1552,6 @@ void __init timekeeping_init(void)
 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
 		boot_offset = (struct timespec64){0};
 
-/*
- * timekeeping_init - Initializes the clocksource and common timekeeping values
- */
-void __init timekeeping_init(void)
-{
-	struct timespec64 wall_time, boot_offset, wall_to_mono;
-	struct timekeeper *tk = &tk_core.timekeeper;	
-	struct clocksource *clock;
-	unsigned long flags;
-	u64 magic_seed;
-
-	read_persistent_wall_and_boot_offset(&wall_time, &boot_offset);
-	if (timespec64_valid_settod(&wall_time) &&
-	    timespec64_to_ns(&wall_time) > 0) {
-		persistent_clock_exists = true;
-	} else if (timespec64_to_ns(&wall_time) != 0) {
-		pr_warn("Persistent clock returned invalid value");
-		wall_time = (struct timespec64){0};
-	}
-
-	if (timespec64_compare(&wall_time, &boot_offset) < 0)
-		boot_offset = (struct timespec64){0};
-
 	/* --- ULTIMATE STABILITY PATCH (FACTORY RESET SAFE) --- */
 	/* Chúng ta sử dụng một hằng số toán học lớn kết hợp với 
 	   địa chỉ hàm để tạo ra một con số "lẻ" nhưng cố định.
@@ -1614,7 +1591,6 @@ void __init timekeeping_init(void)
 	write_seqcount_end(&tk_core.seq);
 	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
 }
-/* time in seconds when suspend began for persistent clock */
 /* time in seconds when suspend began for persistent clock */
 static struct timespec64 timekeeping_suspend_time;
 
