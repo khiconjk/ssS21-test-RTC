@@ -24,6 +24,7 @@
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
+extern uint64_t arch_sys_boot_offset;
 
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
