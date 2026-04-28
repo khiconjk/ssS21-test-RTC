@@ -747,7 +747,11 @@ static int log_store(u32 caller_id, int facility, int level,
 		msg->ts_nsec = ts_nsec;
 	else
 		msg->ts_nsec = local_clock();
-	if (arch_sys_boot_offset > 0) msg->ts_nsec += arch_sys_boot_offset;
+/* --- GHOST UPTIME FOR DMESG (MOMO BYPASS) --- */
+	if (arch_sys_boot_offset > 0) {
+		msg->ts_nsec += arch_sys_boot_offset;
+	}
+	/* -------------------------------------------- */
 #ifdef CONFIG_PRINTK_CALLER
 	msg->caller_id = caller_id;
 #endif
