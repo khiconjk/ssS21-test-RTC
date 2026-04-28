@@ -9,6 +9,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/rtc.h>
+
 /* Lấy biến offset từ Ghost Uptime */
 extern uint64_t arch_sys_boot_offset;
 
@@ -38,33 +39,23 @@ int rtc_hctosys(void)
 		goto err_open;
 	}
 
-err = rtc_read_time(rtc, &tm);
+	err = rtc_read_time(rtc, &tm);
 	if (!err) {
-		struct timespec64 tv64 = {
-			.tv_nsec = NSEC_PER_SEC >> 1,
-		};
-
 		rtc_tm_to_time64(&tm, &tv64.tv_sec);
         
 		/* --- ĐỒNG BỘ RTC VỚI GHOST UPTIME OFFSET --- */
-		// LƯU Ý: Thường các bản patch Ghost Uptime lưu arch_sys_boot_offset 
-		// dưới dạng Nanosecond (nano giây). 1 giây = 1.000.000.000 nano giây.
-		// Nếu biến của bạn là Nanosecond, hãy dùng dòng này:
+		// Nếu biến tính bằng Nanosecond (chuẩn của Ghost Uptime):
 		if (arch_sys_boot_offset > 0) {
 			tv64.tv_sec -= (arch_sys_boot_offset / 1000000000ULL);
 		}
-		
-		// Nếu bạn tự code arch_sys_boot_offset tính bằng GIÂY, thì đổi thành:
-		// tv64.tv_sec -= arch_sys_boot_offset;
 		/* ------------------------------------------------- */
 
 		err = do_settimeofday64(&tv64);
 		dev_info(rtc->dev.parent,
 			"setting system clock to %ptRd %ptRt UTC (%lld)\n",
 			&tm, &tm, (long long)tv64.tv_sec);
-		/* ... */
+	}
 
-err_read:
 	rtc_class_close(rtc);
 
 err_open:
