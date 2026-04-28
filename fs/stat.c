@@ -56,20 +56,21 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->blocks = inode->i_blocks;
 /* --- GHOST UPTIME FOR STAT (MOMO BYPASS) --- */
 if (inode && inode->i_sb && arch_sys_boot_offset > 0) {
-    unsigned long magic = inode->i_sb->s_magic;
-    if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 || 
-        magic == 0x01021994 || magic == 0x64626720 ||
-        magic == 0x27e0eb || magic == 0x6e736673) {
-            
-        // Thay vì 15ULL, hãy dùng biến offset chia cho 1 tỷ để ra giây
-        uint64_t offset_secs = arch_sys_boot_offset / 1000000000ULL;
-        
-        stat->atime.tv_sec -= offset_secs;
-        stat->mtime.tv_sec -= offset_secs;
-        stat->ctime.tv_sec -= offset_secs;
-    }
+	unsigned long magic = inode->i_sb->s_magic;
+
+	if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 ||
+	    magic == 0x01021994 || magic == 0x64626720 ||
+	    magic == 0x27e0eb || magic == 0x6e736673) {
+
+		// div_u64 nhận số chia là kiểu 32-bit (đã bỏ chữ ULL ở số 1 tỷ)
+		u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
+
+		stat->atime.tv_sec -= offset_secs;
+		stat->mtime.tv_sec -= offset_secs;
+		stat->ctime.tv_sec -= offset_secs;
+	}
 }
-	/* ------------------------------------------- */
+/* ------------------------------------------- */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	susfs_generic_fillattr_spoofer(inode, stat);
 #endif
