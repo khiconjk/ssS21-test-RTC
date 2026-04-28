@@ -45,46 +45,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-# ==================== FAKE UPTIME TOÀN HỆ THỐNG (10~15 NGÀY) ====================
-echo "=== Applying Fake Uptime Patch (12 days for o1s Exynos2100) ==="
-
-# Tạo thư mục patches nếu chưa có
-mkdir -p patches/uptime
-
-# Tạo file patch nếu chưa tồn tại (chỉ tạo lần đầu)
-if [ ! -f patches/uptime/0001-fake-uptime-12days.patch ]; then
-cat > patches/uptime/0001-fake-uptime-12days.patch << 'EOF'
-diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
-index xxxxxxx..yyyyyyy 100644
---- a/kernel/time/timekeeping.c
-+++ b/kernel/time/timekeeping.c
-@@ -90,6 +90,24 @@ static struct tk_fast tk_fast_mono ____cacheline_aligned;
- static struct timekeeper shadow_timekeeper;
- 
-+/* --- GHOST UPTIME GLOBAL VARIABLE --- */
-+u64 arch_sys_boot_offset = 12ULL * 86400ULL * 1000000000ULL;
-+EXPORT_SYMBOL_GPL(arch_sys_boot_offset);
-+/* ------------------------------------ */
-+
-+static inline u64 get_fake_boottime_ns(void)
-+{
-+       return arch_sys_boot_offset;
-+}
-+
- static u64 timekeeping_get_delta(const struct tk_read_base *tkr)
- {
-+       u64 delta = tk_clock_read(tkr) - tkr->cycle_last;
-+       return delta + get_fake_boottime_ns();
-+
-        return tk_clock_read(tkr) - tkr->cycle_last;
- }
-EOF
-fi
-
-# Áp dụng patch (dùng patch thay vì git apply để ít lỗi hơn với repo này)
-patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0001-fake-uptime-12days.patch 2>/dev/null || \
-echo "→ Patch đã được áp dụng trước đó hoặc có xung đột nhỏ (tiếp tục build)"
-# =============================================================================
 fetch_ksu() {
 
     rm -rf "$PWD/KernelSU-Next"
