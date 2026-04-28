@@ -118,11 +118,11 @@ export PATH=$CLANG_DIR/bin:$PATH
 
 # --- FAKE STOCK SAMSUNG KERNEL & BYPASS UPTIME ---
 touch .scmversion
-export LOCALVERSION=""
+export LOCALVERSION="-22936777-abG991BXXS3BUL1"
 export KBUILD_BUILD_USER="dpi"
-export KBUILD_BUILD_HOST="SWDD7012"
-export KBUILD_BUILD_TIMESTAMP="Wed Apr 01 15:30:00 KST 2026"
-export KBUILD_BUILD_VERSION="1"
+export KBUILD_BUILD_HOST="21DJ6C20"
+export KBUILD_BUILD_TIMESTAMP="Tue Nov 30 18:48:28 KST 2021"
+export KBUILD_BUILD_VERSION="2"
 # -------------------------------------------------
 
 # Check toolchain tồn tại
