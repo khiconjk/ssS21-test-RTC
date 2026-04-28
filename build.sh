@@ -58,37 +58,53 @@ fetch_ksu() {
 
 # ==================== FAKE STAT TIMESTAMPS (MOMO BYPASS) ====================
 echo "=== Applying Fake Stat Timestamps for System Files ==="
+
+mkdir -p patches/uptime
+
 cat > patches/uptime/0002-fake-stat-timestamps.patch << 'EOF'
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -70,6 +70,23 @@
+@@ -18,6 +18,7 @@
+ #endif
+ 
+ #include <linux/uaccess.h>
++#include <linux/ghost_uptime.h>
+ #include <asm/unistd.h>
+@@ -53,6 +54,23 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
  	stat->ctime = inode->i_ctime;
  	stat->blksize = i_blocksize(inode);
  	stat->blocks = inode->i_blocks;
 +
 +	/* --- GHOST UPTIME FOR STAT (MOMO BYPASS) --- */
-+	{
-+		extern u64 arch_sys_boot_offset;
-+		if (arch_sys_boot_offset > 0 && inode && inode->i_sb) {
-+			unsigned long magic = inode->i_sb->s_magic;
-+			/* procfs, sysfs, devtmpfs, tmpfs, securityfs, debugfs, cgroup, nsfs */
-+			if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 || 
-+			    magic == 0x01021994 || magic == 0x73636673 || magic == 0x64626720 ||
-+			    magic == 0x27e0eb || magic == 0x6e736673) {
-+				long long offset_sec = arch_sys_boot_offset / 1000000000ULL;
-+				stat->atime.tv_sec -= offset_sec;
-+				stat->mtime.tv_sec -= offset_sec;
-+				stat->ctime.tv_sec -= offset_sec;
-+			}
++	if (inode->i_sb && arch_sys_boot_offset > 0) {
++		unsigned long magic = inode->i_sb->s_magic;
++
++		if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 ||
++		    magic == 0x01021994 || magic == 0x73636673 || magic == 0x64626720 ||
++		    magic == 0x27e0eb || magic == 0x6e736673) {
++
++			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
++
++			stat->atime.tv_sec -= offset_secs;
++			stat->mtime.tv_sec -= offset_secs;
++			stat->ctime.tv_sec -= offset_secs;
 +		}
 +	}
- }
- EXPORT_SYMBOL(generic_fillattr);
++	/* ------------------------------------------- */
+ #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+ 	susfs_generic_fillattr_spoofer(inode, stat);
+ #endif
 EOF
 
-patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0002-fake-stat-timestamps.patch 2>/dev/null || echo "→ Patch stat.c applied"
+if grep -q "GHOST UPTIME FOR STAT" fs/stat.c; then
+    echo "→ Patch stat.c already applied"
+elif patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0002-fake-stat-timestamps.patch; then
+    echo "→ Patch stat.c applied"
+else
+    echo "→ Patch stat.c FAILED"
+    exit 1
+fi
 # =============================================================================
-
 enable_susfs() {
 
         echo "Applying SuSFS patch to KernelSU Next..."
