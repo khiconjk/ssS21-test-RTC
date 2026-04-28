@@ -1,132 +1,116 @@
-name: Build Tissot TWRP Kernel GCC
+name: Build o1s Kernel
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v5
         with:
-          ref: thirteen
           fetch-depth: 1
+          submodules: false
 
-      - name: Free disk
+      - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
           sudo apt-get clean
           df -h
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y \
-            git bc bison flex zip unzip curl make python3 \
-            libssl-dev libelf-dev \
-            gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl wget tar xz-utils zip unzip \
+            build-essential bc bison flex \
+            libssl-dev libelf-dev pahole \
+            python3 python3-pip \
+            cpio lz4 gzip kmod rsync ca-certificates
 
-      - name: Build kernel GCC
+      - name: Prepare tools manually
         run: |
-          set -euo pipefail
+          rm -rf KernelSU-Next clang toolchain/mkbootimg toolchain/libufdt
 
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export KBUILD_BUILD_USER=github
-          export KBUILD_BUILD_HOST=actions
+          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
+          git clone --depth=1 https://android.googlesource.com/platform/system/libufdt toolchain/libufdt
 
-          echo "===== REMOVE WERROR FROM SOURCE ====="
-          find . \
-            -path './.git' -prune -o \
-            -path './out' -prune -o \
-            -type f \
-            \( -name 'Makefile' -o -name 'Kbuild' -o -name '*.mk' -o -name '*.c' -o -name '*.h' \) \
-            -print0 | xargs -0 sed -i \
-              -e 's/-Werror=[A-Za-z0-9_-]*//g' \
-              -e 's/-Werror//g'
+          cp -f toolchain/libufdt/utils/src/mkdtboimg.py toolchain/mkdtimg
+          chmod +x toolchain/mkdtimg
 
-          echo "===== DEFCONFIG ====="
-          make O=out ARCH=arm64 msm8953-perf_defconfig
+      - name: Cache clang
+        uses: actions/cache@v5
+        with:
+          path: toolchain/clang-r596125
+          key: clang-r596125-linux-x86-stable
 
-          echo "===== FIX CONFIG ====="
-          scripts/config --file out/.config -d CONFIG_CC_STACKPROTECTOR_STRONG || true
-          scripts/config --file out/.config -e CONFIG_CC_STACKPROTECTOR || true
-          scripts/config --file out/.config -d CONFIG_WERROR || true
-          scripts/config --file out/.config -d CONFIG_ENABLE_WARN_DEPRECATED || true
+      - name: Setup clang
+        run: |
+          if [ ! -x "toolchain/clang-r596125/bin/clang" ]; then
+            echo "Clang not found, downloading..."
 
-          make O=out ARCH=arm64 olddefconfig
+            rm -rf toolchain/clang-r596125
+            rm -f toolchain/clang.tar.gz
 
-          echo "===== BUILD GCC NO WERROR ====="
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-Wno-error -Wno-error=date-time -Wno-error=unused-function -Wno-error=unused-variable -Wno-error=unused-label -Wno-error=maybe-uninitialized -Wno-error=implicit-fallthrough" \
-            KCPPFLAGS="-Wno-error" \
-            Image.gz 2>&1 | tee build.log
+            mkdir -p toolchain/clang-r596125
 
-          echo "===== OUTPUT ====="
-          find out/arch/arm64/boot -type f -exec ls -lh {} \;
+            wget -O toolchain/clang.tar.gz \
+              "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
 
-          echo "===== PICK KERNEL ====="
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb kernel-output
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz kernel-output
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image kernel-output
-          else
-            echo "ERROR: No kernel image found"
-            exit 1
+            tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
           fi
 
-          ls -lh kernel-output
+          toolchain/clang-r596125/bin/clang --version
 
-      - name: Pack AnyKernel3 TWRP zip
+      - name: Patch build.sh (fix clang + typo)
         run: |
-          set -euo pipefail
+          chmod +x build.sh
 
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-          cd AnyKernel3
+          sed -i 's#refs/heads/master/clang-r596125.tar.gz#refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz#g' build.sh
+          sed -i 's#wget \(.*clang-r596125.tar.gz.*\)#wget -O clang.tar.gz \1#g' build.sh
+          sed -i 's#wget -O clang.tar.gz -O clang.tar.gz#wget -O clang.tar.gz#g' build.sh
+          sed -i 's#mkdir clang-r596125#rm -rf clang-r596125\nmkdir -p clang-r596125#g' build.sh
+          sed -i 's#> ../$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh
 
-          rm -rf .git README.md LICENSE
+          echo "===== VERIFY PATCH ====="
+          grep -n "clang-r596125\|vendor_ramdisk\|MODEl" build.sh || true
 
-          cp ../kernel-output ./Image.gz
+      - name: Prepare dtconfigs
+        run: |
+          mkdir -p build/dtconfigs
+          cp -af dt.configs/*.cfg build/dtconfigs/
 
-          cat > anykernel.sh <<'EOF'
-          properties() { '
-          kernel.string=Tissot Kernel
-          do.devicecheck=1
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          device.name1=tissot
-          device.name2=Mi A1
-          '; }
+      - name: Build kernel
+        run: |
+          bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
-          block=/dev/block/bootdevice/by-name/boot;
-          is_slot_device=auto;
-          ramdisk_compression=auto;
+      - name: Show outputs
+        if: always()
+        run: |
+          echo "===== OUTPUT FILES ====="
+          find build/out/o1s -type f | sort || true
 
-          . tools/ak3-core.sh;
+          echo "===== ERROR ====="
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort" build.log | head -200 || true
 
-          split_boot;
-          flash_boot;
-          EOF
+          echo "===== LAST LOG ====="
+          tail -200 build.log || true
 
-          zip -r9 ../Tissot-Kernel-TWRP.zip . -x '*.git*'
-          cd ..
-
-          ls -lh Tissot-Kernel-TWRP.zip
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
         with:
-          name: Tissot-Kernel
+          name: o1s-kernel-build
           path: |
-            Tissot-Kernel-TWRP.zip
-            kernel-output
             build.log
+            build/out/o1s/Image
+            build/out/o1s/*.img
+            build/out/o1s/*.zip
+          if-no-files-found: warn
