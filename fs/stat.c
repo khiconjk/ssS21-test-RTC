@@ -23,9 +23,9 @@
 #endif
 
 #include <linux/uaccess.h>
-#include <linux/uaccess.h>
 #include <linux/ghost_uptime.h>
 #include <linux/math64.h>
+#include <asm/unistd.h>
 
 
 extern uint64_t arch_sys_boot_offset;
