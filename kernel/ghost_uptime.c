@@ -2,7 +2,7 @@
 #include <linux/moduleparam.h>
 
 /* mặc định = 0 → không fake */
-u64 arch_sys_boot_offset = 0;
+extern uint64_t arch_sys_boot_offset;
 
 /* cho phép chỉnh runtime hoặc boot cmdline */
 module_param_named(arch_sys_boot_offset,
