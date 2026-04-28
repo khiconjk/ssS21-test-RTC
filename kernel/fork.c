@@ -2298,13 +2298,39 @@ static __latent_entropy struct task_struct *copy_process(
 	 * visible to the system.
 	 */
 
-	p->start_time = ktime_get_ns();
+    p->start_time = ktime_get_ns();
 	p->real_start_time = ktime_get_boottime_ns();
 
-	/*
-	 * Make it visible to the rest of the system, but dont wake it up yet.
-	 * Need tasklist lock for parent etc handling!
-	 */
+	/* --- GHOST UPTIME SYNC: ULTIMATE LATE INIT CATCHER --- */
+	{
+		extern u64 arch_sys_boot_offset;
+		
+		if (arch_sys_boot_offset) {
+			/* 1. Nhận diện đích danh các tiến trình tên "init" (Dù sinh ra sớm hay muộn) */
+			bool is_init_proc = (p->comm[0] == 'i' && p->comm[1] == 'n' && 
+					     p->comm[2] == 'i' && p->comm[3] == 't' && 
+					     p->comm[4] == '\0');
+			
+			if (is_init_proc) {
+				/* Đặc quyền: Ép giấy khai sinh về 0 để trùng khớp tuyệt đối với PID 1 */
+				p->start_time = 0;
+				p->real_start_time = 0;
+				
+			} else if ((p->start_time > (arch_sys_boot_offset - 10000000000ULL)) && 
+			           (p->start_time < (arch_sys_boot_offset + 180000000000ULL))) {
+				
+				/* 2. Dành cho các tiến trình hệ thống khác sinh ra trong 3 phút đầu */
+				if (p->start_time >= arch_sys_boot_offset) {
+					p->start_time -= arch_sys_boot_offset;
+					p->real_start_time -= arch_sys_boot_offset;
+				} else {
+					p->start_time = 0;
+					p->real_start_time = 0;
+				}
+			}
+		}
+	}
+	/* ----------------------------------------------------- */
 	write_lock_irq(&tasklist_lock);
 
 	/* CLONE_PARENT re-uses the old parent */
