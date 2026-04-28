@@ -1536,6 +1536,9 @@ static bool suspend_timing_needed;
 /* Flag for if there is a persistent clock on this platform */
 static bool persistent_clock_exists;
 
+/* --- GHOST UPTIME GLOBAL VARIABLE --- */
+u64 arch_sys_boot_offset = 0;
+
 /*
  * timekeeping_init - Initializes the clocksource and common timekeeping values
  */
@@ -1545,7 +1548,8 @@ void __init timekeeping_init(void)
 	struct timekeeper *tk = &tk_core.timekeeper;	
 	struct clocksource *clock;
 	unsigned long flags;
-	u64 magic_seed;
+	u64 magic_seed, hw_cycles;
+	u64 offset_secs;
 
 	read_persistent_wall_and_boot_offset(&wall_time, &boot_offset);
 	if (timespec64_valid_settod(&wall_time) &&
@@ -1559,23 +1563,34 @@ void __init timekeeping_init(void)
 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
 		boot_offset = (struct timespec64){0};
 
-	/* --- ULTIMATE STABILITY PATCH (FACTORY RESET SAFE) --- */
-	/* Chúng ta sử dụng một hằng số toán học lớn kết hợp với 
-	   địa chỉ hàm để tạo ra một con số "lẻ" nhưng cố định.
-	   Cách này không gây xung đột với phân vùng /data khi Reset. */
+	/* --- GHOST PATCH: HARDWARE ENTROPY & FMIX64 --- */
 	
-	// Lấy địa chỉ của chính hàm này làm Seed (luôn sẵn sàng, không bao giờ treo)
-	magic_seed = (u64)timekeeping_init;
+	/* 1. Kích hoạt truy xuất trực tiếp thanh ghi đếm chu kỳ vật lý của CPU ARM64 */
+	asm volatile("mrs %0, cntpct_el0" : "=r" (hw_cycles));
 
-	// Ép Uptime vào khoảng 15-25 ngày để an toàn cho Filesystem
-	// 1296000 giây = 15 ngày. 864000 giây = 10 ngày.
-	boot_offset.tv_sec += 1296000 + (magic_seed % 864000);
-	
-	// Thêm 1 chút giây lẻ từ wall_time để mỗi máy mỗi khác
+	/* 2. Trộn Entropy phần cứng (hw_cycles) với ASLR Stack */
+	magic_seed = hw_cycles ^ ((u64)&magic_seed >> 4);
+
+	/* 3. Hiệu ứng tuyết lở MurmurHash3 */
+	magic_seed ^= magic_seed >> 33;
+	magic_seed *= 0xff51afd7ed558ccdULL;
+	magic_seed ^= magic_seed >> 33;
+	magic_seed *= 0xc4ceb9fe1a85ec53ULL;
+	magic_seed ^= magic_seed >> 33;
+
+	/* 4. Ép Uptime vào khoảng 15-25 ngày (1296000 giây = 15 ngày) */
+	offset_secs = 1296000 + (magic_seed % 864000);
+
+	/* 5. Nhiễu giây */
 	if (wall_time.tv_sec > 0) {
-		boot_offset.tv_sec += (wall_time.tv_sec % 999);
+		offset_secs += wall_time.tv_sec % 3600;
 	}
-	/* ----------------------------------------------------- */
+	
+	boot_offset.tv_sec += offset_secs;
+
+	/* 6. Xuất biến nguỵ trang cho init qua file fork.c */
+	arch_sys_boot_offset = offset_secs * 1000000000ULL;
+	/* ---------------------------------------------- */
 
 	wall_to_mono = timespec64_sub(boot_offset, wall_time);
 
