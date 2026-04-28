@@ -53,18 +53,20 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->ctime = inode->i_ctime;
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
-	/* --- GHOST UPTIME FOR STAT (MOMO BYPASS) --- */
-if (inode && inode->i_sb) {
-	unsigned long magic = inode->i_sb->s_magic;
-	/* Trừ lùi 12 ngày cho procfs, sysfs, devtmpfs, tmpfs, cgroup... */
-	if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 || 
-		magic == 0x01021994 || magic == 0x64626720 ||
-		magic == 0x27e0eb || magic == 0x6e736673) {
-			
-		stat->atime.tv_sec -= (15ULL * 86400ULL);
-		stat->mtime.tv_sec -= (15ULL * 86400ULL);
-		stat->ctime.tv_sec -= (15ULL * 86400ULL);
-	}
+/* --- GHOST UPTIME FOR STAT (MOMO BYPASS) --- */
+if (inode && inode->i_sb && arch_sys_boot_offset > 0) {
+    unsigned long magic = inode->i_sb->s_magic;
+    if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 || 
+        magic == 0x01021994 || magic == 0x64626720 ||
+        magic == 0x27e0eb || magic == 0x6e736673) {
+            
+        // Thay vì 15ULL, hãy dùng biến offset chia cho 1 tỷ để ra giây
+        uint64_t offset_secs = arch_sys_boot_offset / 1000000000ULL;
+        
+        stat->atime.tv_sec -= offset_secs;
+        stat->mtime.tv_sec -= offset_secs;
+        stat->ctime.tv_sec -= offset_secs;
+    }
 }
 	/* ------------------------------------------- */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
