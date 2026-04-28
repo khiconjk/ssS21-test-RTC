@@ -217,7 +217,14 @@ static void timekeeping_check_update(struct timekeeper *tk, u64 offset)
 		tk->overflow_seen = 0;
 	}
 }
+/* Fake Uptime Toàn Hệ Thống cho Exynos2100 (o1s) - 12 Ngay */
+static inline u64 get_fake_boottime_ns(void)
+{
+       return (12ULL * 86400ULL * 1000000000ULL);
+}
 
+static u64 timekeeping_get_delta(const struct tk_read_base *tkr)
+{
 static inline u64 timekeeping_get_delta(const struct tk_read_base *tkr)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
