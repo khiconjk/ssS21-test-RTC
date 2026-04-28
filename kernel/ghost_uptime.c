@@ -1,10 +1,14 @@
-#include <linux/types.h>
-#include <linux/moduleparam.h>
+#include <linux/random.h> // Thêm thư viện để lấy số ngẫu nhiên
 
-/* mặc định = 0 → không fake */
-extern uint64_t arch_sys_boot_offset;
+// ... các phần khác ...
 
-/* cho phép chỉnh runtime hoặc boot cmdline */
-module_param_named(arch_sys_boot_offset,
-                   arch_sys_boot_offset,
-                   ullong, 0644);
+void ghost_uptime_init(void) {
+    uint64_t random_days;
+    
+    // Lấy số ngẫu nhiên từ 10 đến 20
+    get_random_bytes(&random_days, sizeof(random_days));
+    random_days = 10 + (random_days % 11); 
+
+    // Chuyển sang Nano giây và gán vào biến toàn cục
+    arch_sys_boot_offset = random_days * 86400ULL * 1000000000ULL;
+}
