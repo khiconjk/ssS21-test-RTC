@@ -1,16 +1,23 @@
-#include <linux/random.h> // Thêm thư viện để lấy số ngẫu nhiên
+#include <linux/types.h>
+#include <linux/random.h>
+#include <linux/init.h>
 #include <linux/ghost_uptime.h>
 
 u64 arch_sys_boot_offset = 0;
-// ... các phần khác ...
 
-void ghost_uptime_init(void) {
-    uint64_t random_days;
-    
-    // Lấy số ngẫu nhiên từ 10 đến 20
-    get_random_bytes(&random_days, sizeof(random_days));
-    random_days = 10 + (random_days % 11); 
+void ghost_uptime_init(void)
+{
+	u32 random_days;
 
-    // Chuyển sang Nano giây và gán vào biến toàn cục
-    arch_sys_boot_offset = random_days * 86400ULL * 1000000000ULL;
+	get_random_bytes(&random_days, sizeof(random_days));
+	random_days = 15 + (random_days % 11);
+
+	arch_sys_boot_offset = (u64)random_days * 86400ULL * 1000000000ULL;
 }
+
+static int __init ghost_uptime_module_init(void)
+{
+	ghost_uptime_init();
+	return 0;
+}
+early_initcall(ghost_uptime_module_init);
