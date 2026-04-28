@@ -61,9 +61,9 @@ if (inode && inode->i_sb) {
 		magic == 0x01021994 || magic == 0x64626720 ||
 		magic == 0x27e0eb || magic == 0x6e736673) {
 			
-		stat->atime.tv_sec -= (12ULL * 86400ULL);
-		stat->mtime.tv_sec -= (12ULL * 86400ULL);
-		stat->ctime.tv_sec -= (12ULL * 86400ULL);
+		stat->atime.tv_sec -= (15ULL * 86400ULL);
+		stat->mtime.tv_sec -= (15ULL * 86400ULL);
+		stat->ctime.tv_sec -= (15ULL * 86400ULL);
 	}
 }
 	/* ------------------------------------------- */
