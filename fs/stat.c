@@ -5,7 +5,6 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
-#include <linux/math64.h>
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
@@ -24,7 +23,11 @@
 #endif
 
 #include <linux/uaccess.h>
-#include <asm/unistd.h>
+#include <linux/uaccess.h>
+#include <linux/ghost_uptime.h>
+#include <linux/math64.h>
+
+
 extern uint64_t arch_sys_boot_offset;
 
 /**
