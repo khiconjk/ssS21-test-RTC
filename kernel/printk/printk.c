@@ -62,7 +62,7 @@
 #include "console_cmdline.h"
 #include "braille.h"
 #include "internal.h"
-extern u64 arch_sys_boot_offset;
+extern uint64_t arch_sys_boot_offset;
 
 int console_printk[4] = {
 	CONSOLE_LOGLEVEL_DEFAULT,	/* console_loglevel */
@@ -748,7 +748,8 @@ static int log_store(u32 caller_id, int facility, int level,
 	else
 		msg->ts_nsec = local_clock();
 /* --- GHOST UPTIME FOR DMESG (MOMO BYPASS) --- */
-	msg->ts_nsec += (12ULL * 86400ULL * 1000000000ULL);
+if (arch_sys_boot_offset > 0) {
+		msg->ts_nsec += arch_sys_boot_offset;
 /* -------------------------------------------- */
 #ifdef CONFIG_PRINTK_CALLER
 	msg->caller_id = caller_id;
