@@ -12,12 +12,15 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           fetch-depth: 1
+          submodules: false
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
           sudo apt-get clean
           df -h
 
@@ -31,15 +34,17 @@ jobs:
             python3 python3-pip \
             cpio lz4 gzip kmod rsync ca-certificates
 
-      - name: Prepare tools
+      - name: Prepare submodules manually
         run: |
-          mkdir -p toolchain
-
+          rm -rf KernelSU-Next
+          rm -rf clang
           rm -rf toolchain/mkbootimg
-          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
+          rm -rf toolchain/libufdt
 
-          rm -rf toolchain/mkdtimg
+          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
           git clone --depth=1 https://android.googlesource.com/platform/system/libufdt toolchain/libufdt
+
           cp -f toolchain/libufdt/utils/src/mkdtimg.py toolchain/mkdtimg
           chmod +x toolchain/mkdtimg
 
@@ -47,24 +52,33 @@ jobs:
         uses: actions/cache@v5
         with:
           path: toolchain/clang-r596125
-          key: clang-r596125-linux-x86-v2
+          key: clang-r596125-linux-x86-v3
 
       - name: Setup clang
         run: |
           if [ ! -x "toolchain/clang-r596125/bin/clang" ]; then
-            rm -rf toolchain/clang-r596125 toolchain/clang.tar.gz
+            rm -rf toolchain/clang-r596125
+            rm -f toolchain/clang.tar.gz
+
             mkdir -p toolchain/clang-r596125
+
             wget -O toolchain/clang.tar.gz \
               "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+
             tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
           fi
 
           toolchain/clang-r596125/bin/clang --version
 
-      - name: Patch build.sh typo
+      - name: Patch build.sh
         run: |
-          sed -i 's#> ../$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh
+          chmod +x build.sh
+
           sed -i 's#wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"#wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"#g' build.sh
+
+          sed -i 's#mkdir clang-r596125#rm -rf clang-r596125\nmkdir -p clang-r596125#g' build.sh
+
+          sed -i 's#> ../$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh
 
       - name: Prepare dtconfigs
         run: |
@@ -73,7 +87,6 @@ jobs:
 
       - name: Build o1s kernel
         run: |
-          chmod +x build.sh
           bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
       - name: Show outputs
@@ -83,7 +96,7 @@ jobs:
           find build/out/o1s -type f | sort || true
 
           echo "===== ERROR LINES ====="
-          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort" build.log | head -150 || true
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort\|cannot stat" build.log | head -200 || true
 
           echo "===== LAST 200 LINES ====="
           tail -200 build.log || true
