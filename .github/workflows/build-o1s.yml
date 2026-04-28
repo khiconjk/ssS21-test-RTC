@@ -11,6 +11,15 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+          sudo apt-get clean
+          df -h
 
       - name: Install dependencies
         run: |
@@ -20,60 +29,73 @@ jobs:
             build-essential bc bison flex \
             libssl-dev libelf-dev pahole \
             python3 python3-pip \
-            cpio lz4 kmod rsync ca-certificates
+            cpio lz4 gzip kmod rsync ca-certificates
+
+      - name: Prepare tools
+        run: |
+          mkdir -p toolchain
+
+          rm -rf toolchain/mkbootimg
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
+
+          rm -rf toolchain/mkdtimg
+          git clone --depth=1 https://android.googlesource.com/platform/system/libufdt toolchain/libufdt
+          cp -f toolchain/libufdt/utils/src/mkdtimg.py toolchain/mkdtimg
+          chmod +x toolchain/mkdtimg
+
+      - name: Cache clang
+        uses: actions/cache@v5
+        with:
+          path: toolchain/clang-r596125
+          key: clang-r596125-linux-x86-v2
+
+      - name: Setup clang
+        run: |
+          if [ ! -x "toolchain/clang-r596125/bin/clang" ]; then
+            rm -rf toolchain/clang-r596125 toolchain/clang.tar.gz
+            mkdir -p toolchain/clang-r596125
+            wget -O toolchain/clang.tar.gz \
+              "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+            tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
+          fi
+
+          toolchain/clang-r596125/bin/clang --version
+
+      - name: Patch build.sh typo
+        run: |
+          sed -i 's#> ../$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh
+          sed -i 's#wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"#wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"#g' build.sh
 
       - name: Prepare dtconfigs
         run: |
           mkdir -p build/dtconfigs
           cp -af dt.configs/*.cfg build/dtconfigs/
-          
-      - name: Clone mkbootimg
+
+      - name: Build o1s kernel
         run: |
-         mkdir -p toolchain
-         rm -rf toolchain/mkbootimg
-         git clone https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
-         
-      - name: Cache clang toolchain
-        uses: actions/cache@v5
-        with:
-          path: toolchain/clang-r596125
-          key: clang-r596125-v1
-          
-      - name: Setup clang
-        run: |
-          if [ ! -d "toolchain/clang-r596125" ]; then
-            echo "Clang not found, downloading..."
-            mkdir -p toolchain
-            cd toolchain
-            wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r596125.tar.gz -O clang.tar.gz
-            mkdir clang-r596125
-            tar -xf clang.tar.gz -C clang-r596125
-          else
-            echo "Using cached clang"
-          fi   
-          
-      - name: Build kernel
-        run: |
+          chmod +x build.sh
           bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
       - name: Show outputs
-        run: |
-          find build/out/o1s -maxdepth 2 -type f | sort || true
-          
-      - name: Show real errors
         if: always()
         run: |
+          echo "===== OUTPUT FILES ====="
+          find build/out/o1s -type f | sort || true
+
           echo "===== ERROR LINES ====="
-          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED" build.log | head -100 || true
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort" build.log | head -150 || true
+
           echo "===== LAST 200 LINES ====="
           tail -200 build.log || true
-          
+
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: o1s-kernel-build
           path: |
+            build.log
             build/out/o1s/Image
-            build/out/o1s/*.zip
             build/out/o1s/*.img
+            build/out/o1s/*.zip
           if-no-files-found: warn
