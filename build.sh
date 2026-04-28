@@ -1,12 +1,13 @@
 #!/bin/bash
+set -e
 
 abort()
 {
-    cd -
+    cd - 2>/dev/null || true
     echo "-----------------------------------------------"
     echo "Kernel compilation failed! Exiting..."
     echo "-----------------------------------------------"
-    exit -1
+    exit 1
 }
 
 unset_flags()
@@ -17,7 +18,7 @@ Options:
     -m, --model [value]    Specify the model code of the phone
     -k, --ksu [y/N]        Include KernelSU
     -s, --susfs [y/N]      Include SuSFS
-    -r, --recovery [y/N]   Compile kernel for an Android Recovery																 
+    -r, --recovery [y/N]   Compile kernel for an Android Recovery
 EOF
 }
 
@@ -39,24 +40,165 @@ while [[ $# -gt 0 ]]; do
             RECOVERY_OPTION="$2"
             shift 2
             ;;
-        *)\
+        *)
             unset_flags
             exit 1
             ;;
     esac
 done
-fetch_ksu() {
 
+fetch_ksu() {
     rm -rf "$PWD/KernelSU-Next"
 
-        echo "Fetching latest KernelSU Next"
-        git submodule update --init KernelSU-Next || {
-            echo "Failed to initialize KSU Next submodule!"
-            exit 1
-        }
+    echo "Fetching latest KernelSU Next"
+    git submodule update --init KernelSU-Next || {
+        echo "Failed to initialize KSU Next submodule!"
+        exit 1
+    }
 }
 
-# ==================== FAKE STAT TIMESTAMPS (MOMO BYPASS) ====================
+enable_susfs() {
+    echo "Applying SuSFS patch to KernelSU Next..."
+    patch -d "$PWD/KernelSU-Next" -p1 < "$PWD/patches/enable-susfs.patch" || {
+        echo "Failed to apply SuSFS patch!"
+        exit 1
+    }
+}
+
+echo "Preparing the build environment..."
+
+pushd "$(dirname "$0")" > /dev/null
+CORES=$(nproc)
+
+# Clean old dirty build output
+echo "Cleaning old out directory..."
+rm -rf out
+
+# Define toolchain variables
+CLANG_DIR=$PWD/toolchain/clang-r596125
+export PATH=$CLANG_DIR/bin:$PATH
+
+# --- FAKE STOCK SAMSUNG KERNEL & BYPASS UPTIME ---
+touch .scmversion
+export LOCALVERSION="-22936777-abG991BXXS3BUL1"
+export KBUILD_BUILD_USER="dpi"
+export KBUILD_BUILD_HOST="21DJ6C20"
+export KBUILD_BUILD_TIMESTAMP="Tue Nov 30 18:48:28 KST 2021"
+export KBUILD_BUILD_VERSION="2"
+# -------------------------------------------------
+
+# Check toolchain
+if [ ! -d "$CLANG_DIR" ] || [ -z "$(ls -A "$CLANG_DIR/bin" 2>/dev/null)" ]; then
+    echo "-----------------------------------------------"
+    echo "Clang not found! Downloading..."
+    echo "-----------------------------------------------"
+
+    mkdir -p toolchain
+    cd toolchain
+
+    wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+    rm -rf clang-r596125
+    mkdir -p clang-r596125
+    tar -xf clang.tar.gz -C clang-r596125
+
+    cd ..
+else
+    echo "-----------------------------------------------"
+    echo "Using existing clang toolchain"
+    echo "-----------------------------------------------"
+fi
+
+MAKE_ARGS="
+LLVM=1 \
+LLVM_IAS=1 \
+ARCH=arm64 \
+O=out
+"
+
+case $MODEL in
+r9s)
+    BOARD=SRPUG16A010KU
+;;
+o1s)
+    BOARD=SRPTH19C011KU
+;;
+t2s)
+    BOARD=SRPTG24B014KU
+;;
+p3s)
+    BOARD=SRPTH19D013KU
+;;
+*)
+    unset_flags
+    exit 1
+;;
+esac
+
+if [[ "$RECOVERY_OPTION" == "y" ]]; then
+    RECOVERY=recovery.config
+    KSU_OPTION=n
+    SUSFS_OPTION=n
+fi
+
+if [ -z "$KSU_OPTION" ]; then
+    read -p "Include KernelSU (y/N): " KSU_OPTION
+fi
+
+if [[ "$KSU_OPTION" == "y" ]]; then
+    KSU=ksu.config
+fi
+
+if [[ "$SUSFS_OPTION" == "y" ]]; then
+    SUSFS=susfs.config
+fi
+
+# ==================== GHOST UPTIME CORE ====================
+echo "=== Preparing Ghost Uptime Core ==="
+
+cat > include/linux/ghost_uptime.h << 'EOF'
+#ifndef _LINUX_GHOST_UPTIME_H
+#define _LINUX_GHOST_UPTIME_H
+
+#include <linux/types.h>
+
+extern u64 arch_sys_boot_offset;
+
+#endif
+EOF
+
+cat > kernel/ghost_uptime.c << 'EOF'
+#include <linux/types.h>
+#include <linux/random.h>
+#include <linux/init.h>
+#include <linux/ghost_uptime.h>
+
+u64 arch_sys_boot_offset = 0;
+
+void ghost_uptime_init(void)
+{
+	u32 random_days;
+
+	get_random_bytes(&random_days, sizeof(random_days));
+	random_days = 15 + (random_days % 6);
+
+	arch_sys_boot_offset =
+		(u64)random_days * 86400ULL * 1000000000ULL;
+}
+
+static int __init ghost_uptime_module_init(void)
+{
+	ghost_uptime_init();
+	return 0;
+}
+early_initcall(ghost_uptime_module_init);
+EOF
+
+if ! grep -Fxq "obj-y += ghost_uptime.o" kernel/Makefile; then
+    echo "obj-y += ghost_uptime.o" >> kernel/Makefile
+fi
+# ===========================================================
+
+# ==================== FAKE STAT TIMESTAMPS ====================
 echo "=== Applying Fake Stat Timestamps for System Files ==="
 
 mkdir -p patches/uptime
@@ -64,13 +206,17 @@ mkdir -p patches/uptime
 cat > patches/uptime/0002-fake-stat-timestamps.patch << 'EOF'
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -18,6 +18,7 @@
+@@ -17,8 +17,10 @@
+ #include <linux/version.h>
  #endif
  
  #include <linux/uaccess.h>
 +#include <linux/ghost_uptime.h>
++#include <linux/math64.h>
  #include <asm/unistd.h>
-@@ -53,6 +54,23 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
+ 
+ /**
+@@ -50,6 +52,23 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
  	stat->ctime = inode->i_ctime;
  	stat->blksize = i_blocksize(inode);
  	stat->blocks = inode->i_blocks;
@@ -104,134 +250,45 @@ else
     echo "→ Patch stat.c FAILED"
     exit 1
 fi
-# =============================================================================
-enable_susfs() {
-
-        echo "Applying SuSFS patch to KernelSU Next..."
-        patch -d "$PWD/KernelSU-Next" -p1 < "$PWD/patches/enable-susfs.patch" || {
-            echo "Failed to apply SuSFS patch!"
-            exit 1
-        }
-}
-
-echo "Preparing the build environment..."
-
-pushd $(dirname "$0") > /dev/null
-CORES=$(nproc)
-
-# Define toolchain variables
-CLANG_DIR=$PWD/toolchain/clang-r596125
-export PATH=$CLANG_DIR/bin:$PATH
-
-# --- FAKE STOCK SAMSUNG KERNEL & BYPASS UPTIME ---
-touch .scmversion
-export LOCALVERSION="-22936777-abG991BXXS3BUL1"
-export KBUILD_BUILD_USER="dpi"
-export KBUILD_BUILD_HOST="21DJ6C20"
-export KBUILD_BUILD_TIMESTAMP="Tue Nov 30 18:48:28 KST 2021"
-export KBUILD_BUILD_VERSION="2"
-# -------------------------------------------------
-
-# Check toolchain tồn tại
-if [ ! -d "$CLANG_DIR" ] || [ -z "$(ls -A $CLANG_DIR/bin 2>/dev/null)" ]; then
-    echo "-----------------------------------------------"
-    echo "Clang not found! Downloading..."
-    echo "-----------------------------------------------"
-
-    mkdir -p toolchain
-    cd toolchain
-
-	wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
-	rm -rf clang-r596125
-	mkdir -p clang-r596125
-	tar -xf clang.tar.gz -C clang-r596125
-
-    cd ..
-else
-    echo "-----------------------------------------------"
-    echo "Using existing clang toolchain"
-    echo "-----------------------------------------------"
-fi
-
-MAKE_ARGS="
-LLVM=1 \
-LLVM_IAS=1 \
-ARCH=arm64 \
-O=out
-"
-
-# Define specific variables
-case $MODEL in
-r9s)
-    BOARD=SRPUG16A010KU
-;;
-o1s)
-    BOARD=SRPTH19C011KU
-;;
-t2s)
-    BOARD=SRPTG24B014KU
-;;
-p3s)
-    BOARD=SRPTH19D013KU
-;;
-*)
-    unset_flags
-    exit
-esac
-
-if [[ "$RECOVERY_OPTION" == "y" ]]; then
-    RECOVERY=recovery.config
-    KSU_OPTION=n
-    SUSFS_OPTION=n
-fi
-
-if [ -z $KSU_OPTION ]; then
-    read -p "Include KernelSU (y/N): " KSU_OPTION
-fi
-
-if [[ "$KSU_OPTION" == "y" ]]; then
-    KSU=ksu.config
-fi
-
-if [[ "$SUSFS_OPTION" == "y" ]]; then
-    SUSFS=susfs.config
-fi
+# ===============================================================
 
 rm -rf build/out/$MODEL
 mkdir -p build/out/$MODEL/zip/files
 mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
 
 build_kernel() {
-    # Build kernel image
     echo "-----------------------------------------------"
-    echo "Defconfig: "$KERNEL_DEFCONFIG""
+    echo "Defconfig: $KERNEL_DEFCONFIG"
 
     if [[ "$RECOVERY_OPTION" == "y" ]]; then
         RECOVERY=recovery.config
         KSU_OPTION=n
         SUSFS_OPTION=n
     fi
+
     if [ -z "$KSU" ]; then
         echo "KSU: N"
     else
         echo "KSU: $KSU"
     fi
+
     if [ -z "$SUSFS" ]; then
         echo "SUSFS: N"
     else
         echo "SUSFS: $SUSFS"
     fi
+
     if [ -z "$RECOVERY" ]; then
-    echo "Recovery: N"
+        echo "Recovery: N"
     else
         echo "Recovery: Y"
     fi
 
     echo "-----------------------------------------------"
-    echo "Building kernel using "$KERNEL_DEFCONFIG""
     echo "Generating configuration file..."
     echo "-----------------------------------------------"
-    make ${MAKE_ARGS} -j$CORES exynos2100_defconfig $MODEL.config $RECOVERY $KSU $SUSFS || abort
+
+    make ${MAKE_ARGS} exynos2100_defconfig $MODEL.config $RECOVERY $KSU $SUSFS || abort
 
     echo "Building kernel..."
     echo "-----------------------------------------------"
@@ -239,46 +296,49 @@ build_kernel() {
 }
 
 build_boot() {
-
     cp -a out/arch/arm64/boot/Image build/out/$MODEL
 
-    if [ -z "$RECOVERY" ]; then			   
-    echo "-----------------------------------------------"
-    echo "Building boot.img RAMDisk..."
-    mkdir -p build/out/$MODEL/boot_ramdisk00
+    if [ -z "$RECOVERY" ]; then
+        echo "-----------------------------------------------"
+        echo "Building boot.img RAMDisk..."
 
-    # Copy common files for boot.img's RAMDisk
-    cp -a build/ramdisk/boot/boot_ramdisk00 build/out/$MODEL
+        mkdir -p build/out/$MODEL/boot_ramdisk00
+        cp -a build/ramdisk/boot/boot_ramdisk00 build/out/$MODEL
 
-    pushd build/out/$MODEL/boot_ramdisk00 > /dev/null
-    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | lz4 -l > ../boot_ramdisk || abort
-    popd > /dev/null
+        pushd build/out/$MODEL/boot_ramdisk00 > /dev/null
+        find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | lz4 -l > ../boot_ramdisk || abort
+        popd > /dev/null
 
-    echo "-----------------------------------------------"
-    echo "Building boot.img..."
+        echo "-----------------------------------------------"
+        echo "Building boot.img..."
 
-    OUTPUT_FILE=build/out/$MODEL/boot.img
-    RAMDISK_00=build/out/$MODEL/boot_ramdisk
-    KERNEL=build/out/$MODEL/Image
-    HEADER_VERSION=3
-    OS_VERSION=16.0.0
-    OS_PATCH_LEVEL=2025-11
-    CMDLINE="androidboot.selinux=permissive loop.max_part=7"
+        OUTPUT_FILE=build/out/$MODEL/boot.img
+        RAMDISK_00=build/out/$MODEL/boot_ramdisk
+        KERNEL=build/out/$MODEL/Image
+        HEADER_VERSION=3
+        OS_VERSION=16.0.0
+        OS_PATCH_LEVEL=2025-11
+        CMDLINE="androidboot.selinux=permissive loop.max_part=7"
 
-	python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --cmdline "$CMDLINE" --ramdisk $RAMDISK_00 \
-	--os_version $OS_VERSION --os_patch_level $OS_PATCH_LEVEL --kernel $KERNEL --output $OUTPUT_FILE || abort
-	fi  
+        python3 toolchain/mkbootimg/mkbootimg.py \
+            --header_version $HEADER_VERSION \
+            --cmdline "$CMDLINE" \
+            --ramdisk $RAMDISK_00 \
+            --os_version $OS_VERSION \
+            --os_patch_level $OS_PATCH_LEVEL \
+            --kernel $KERNEL \
+            --output $OUTPUT_FILE || abort
+    fi
 }
 
 build_dtb() {
     echo "-----------------------------------------------"
     echo "Building DTB image..."
-    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort 
+    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort
 
     echo "-----------------------------------------------"
     echo "Building DTBO image..."
     ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img dt.configs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung/$MODEL || abort
-    
 }
 
 build_modules() {
@@ -287,46 +347,29 @@ build_modules() {
 
     echo "-----------------------------------------------"
     echo "Building modules..."
-    # Strip modules and place them in modules folder
+
     make ${MAKE_ARGS} INSTALL_MOD_PATH=$MODULES_FOLDER INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
 
-    # List of kernel modules to remove
-    # Some of the kernel modules are in /vendor_dlkm or /vendor/lib/modules and not in vendor_boot
-    # So we will remove them from the folder and run depmod again to update the files
     FILENAMES="
     sec_debug_sched_info.ko
     "
+
     for FILENAME in $FILENAMES; do
         FILE=$(find out/$MODULES_FOLDER -type f -name "$FILENAME")
         echo "$FILE" | xargs rm -f
     done
 
-    # Now we run depmod to update the dep/softdep files
-    # For this we need the kernel version
     KERNEL_DIR_PATH=$(find "out/$MODULES_FOLDER/lib/modules" -maxdepth 1 -type d -name "5.4*") || abort
     KERNEL_VERSION=$(basename $KERNEL_DIR_PATH) || abort
 
-    # And finally depmod itself
     depmod -a -b out/$MODULES_FOLDER $KERNEL_VERSION || abort
 
-    # depmod updates modules.alias, modules.dep and modules.softdep
-    # But the module order is not updated by depmod
-    # We have to remove the filenames ourselves
-    # But first, our vendor_boot needs modules.order definitions that go like:
-    # fingerprint.ko
-    # Clang generates modules.order definitions like this
-    # kernel/drivers/fingerprint/fingerprint.ko
-    # So we sed the file to adapt
-    sed -i 's/.*\///g' $KERNEL_DIR_PATH/modules.order 
+    sed -i 's/.*\///g' $KERNEL_DIR_PATH/modules.order
 
-    # Now we sed the bad filenames out of the file with a loop
     for FILENAME in $FILENAMES; do
         sed -i "/$FILENAME/d" "$KERNEL_DIR_PATH/modules.order"
     done
 
-    # Now we have to order the modules
-    # These files have to be at the top of modules.order in this order, and then we can keep the default order.
-    # Samsung wants the file to be renamed to modules.load anyways, so we will craft our own modules.load file based on modules.order
     touch $KERNEL_DIR_PATH/modules.load
 
     INITIAL_ORDER="
@@ -366,50 +409,30 @@ build_modules() {
     fingerprint.ko
     "
 
-    # First we add the order from Samsung into our new modules.load
-    # And we sed it out of modules.order
     for LINE in $INITIAL_ORDER; do
         echo $LINE >> $KERNEL_DIR_PATH/modules.load
         sed -i "/$LINE/d" "$KERNEL_DIR_PATH/modules.order"
     done
 
-    # Now we add the remaining lines from modules.order into modules.load
     while IFS= read -r line; do
         echo "$line" >> "$KERNEL_DIR_PATH/modules.load"
     done < "$KERNEL_DIR_PATH/modules.order"
 
-    # Now we have to also modify modules.dep
-    # Android generates them like this
-    # kernel/drivers/dma/samsung-dma.ko: kernel/drivers/dma/pl330.ko
-    # But Samsung wants them like this
-    # /lib/modules/samsung-dma.ko: /lib/modules/pl330.ko
-    # So we will format it with sed
     sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$KERNEL_DIR_PATH/modules.dep"
 
-    # Now the modules and their configuration descriptor files are ready, we move them to a folder and create the new second ramdisk
-    # The second ramdisk should contain a /lib/modules where the modules are located
     mkdir -p build/out/$MODEL/modules/lib/modules
-
     find $KERNEL_DIR_PATH -name '*.ko' -exec cp '{}' build/out/$MODEL/modules/lib/modules ';'
-
-    # We also copy the module configuration descriptors
     cp $KERNEL_DIR_PATH/modules.{alias,dep,softdep,load} build/out/$MODEL/modules/lib/modules
 }
 
 build_vendor_boot() {
     echo "-----------------------------------------------"
     echo "Building vendor_boot RAMDisks..."
-    # Copy common vendor_ramdisk00 files to build/out
+
     cp -a build/ramdisk/vendor_boot/ramdisk00 build/out/$MODEL/vendor_ramdisk00
-
-    # Copy module files for vendor_ramdisk00
     cp -a build/out/$MODEL/modules/lib/* build/out/$MODEL/vendor_ramdisk00/lib
-
-    # Copy device firmware files for vendor_ramdisk00
     cp -a build/ramdisk/vendor_boot/vendor_firmware/$MODEL/* build/out/$MODEL/vendor_ramdisk00
 
-    # Pack RAMDisks
-    # vendor_ramdisk == ramdisk00
     pushd build/out/$MODEL/vendor_ramdisk00 > /dev/null
     find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../vendor_ramdisk || abort
     popd > /dev/null
@@ -429,9 +452,19 @@ build_vendor_boot() {
     DTB_OFFSET=0x0000000081F00000
     CMDLINE="androidboot.selinux=permissive loop.max_part=7"
 
-    python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --pagesize $PAGESIZE --base $BASE --kernel_offset $KERNEL_OFFSET \
-	--ramdisk_offset $RAMDISK_OFFSET --tags_offset $TAGS_OFFSET --dtb_offset $DTB_OFFSET --vendor_cmdline "$CMDLINE" --board $BOARD --dtb $DTB_PATH  \
-	--vendor_ramdisk $RAMDISK_00 --vendor_boot $OUTPUT_FILE || abort
+    python3 toolchain/mkbootimg/mkbootimg.py \
+        --header_version $HEADER_VERSION \
+        --pagesize $PAGESIZE \
+        --base $BASE \
+        --kernel_offset $KERNEL_OFFSET \
+        --ramdisk_offset $RAMDISK_OFFSET \
+        --tags_offset $TAGS_OFFSET \
+        --dtb_offset $DTB_OFFSET \
+        --vendor_cmdline "$CMDLINE" \
+        --board $BOARD \
+        --dtb $DTB_PATH \
+        --vendor_ramdisk $RAMDISK_00 \
+        --vendor_boot $OUTPUT_FILE || abort
 }
 
 build_zip() {
@@ -468,7 +501,7 @@ build_zip() {
 
     version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
     version=${version:1}
-    DATE=`date +"%d-%m-%Y_%H-%M-%S"`
+    DATE=$(date +"%d-%m-%Y_%H-%M-%S")
 
     if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
         NAME="${version}_${MODEL}_KSUN_SUSFS_OFFICIAL_${DATE}.zip"
@@ -477,6 +510,7 @@ build_zip() {
     else
         NAME="${version}_${MODEL}_VANILLA_OFFICIAL_${DATE}.zip"
     fi
+
     zip -r9 "../build/out/$MODEL/$NAME" * -x ".git*" "README.md" "*placeholder" || abort
     popd > /dev/null
 }
@@ -491,7 +525,7 @@ if [[ "$KSU_OPTION" == "y" ]]; then
     fetch_ksu
 
     if [[ "$SUSFS_OPTION" == "y" ]]; then
-    enable_susfs
+        enable_susfs
     fi
 
     if ! grep -Fxq "$KSU" "$KCONFIG_FILE"; then
@@ -505,7 +539,7 @@ if [[ "$KSU_OPTION" == "y" ]]; then
 else
 
     fetch_ksu
-    
+
     sed -i "\|$KSU|d" "$KCONFIG_FILE"
     sed -i "\|$MAKEFILE_LINE|d" "$MAKEFILE"
 fi
@@ -515,10 +549,10 @@ build_boot
 build_dtb
 build_modules
 
-if [ -z "$RECOVERY" ]; then				   
-build_vendor_boot
-build_zip
-fi 
+if [ -z "$RECOVERY" ]; then
+    build_vendor_boot
+    build_zip
+fi
 
 popd > /dev/null
 echo "-----------------------------------------------"
