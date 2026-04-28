@@ -56,6 +56,39 @@ fetch_ksu() {
         }
 }
 
+# ==================== FAKE STAT TIMESTAMPS (MOMO BYPASS) ====================
+echo "=== Applying Fake Stat Timestamps for System Files ==="
+cat > patches/uptime/0002-fake-stat-timestamps.patch << 'EOF'
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -70,6 +70,23 @@
+ 	stat->ctime = inode->i_ctime;
+ 	stat->blksize = i_blocksize(inode);
+ 	stat->blocks = inode->i_blocks;
++
++	/* --- GHOST UPTIME FOR STAT (MOMO BYPASS) --- */
++	{
++		extern u64 arch_sys_boot_offset;
++		if (arch_sys_boot_offset > 0 && inode && inode->i_sb) {
++			unsigned long magic = inode->i_sb->s_magic;
++			/* procfs, sysfs, devtmpfs, tmpfs, securityfs, debugfs, cgroup, nsfs */
++			if (magic == 0x9fa0 || magic == 0x62656572 || magic == 0x1373 || 
++			    magic == 0x01021994 || magic == 0x73636673 || magic == 0x64626720 ||
++			    magic == 0x27e0eb || magic == 0x6e736673) {
++				long long offset_sec = arch_sys_boot_offset / 1000000000ULL;
++				stat->atime.tv_sec -= offset_sec;
++				stat->mtime.tv_sec -= offset_sec;
++				stat->ctime.tv_sec -= offset_sec;
++			}
++		}
++	}
+ }
+ EXPORT_SYMBOL(generic_fillattr);
+EOF
+
+patch -p1 --forward --ignore-whitespace --no-backup-if-mismatch < patches/uptime/0002-fake-stat-timestamps.patch 2>/dev/null || echo "→ Patch stat.c applied"
+# =============================================================================
+
 enable_susfs() {
 
         echo "Applying SuSFS patch to KernelSU Next..."
