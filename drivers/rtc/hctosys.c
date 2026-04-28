@@ -9,6 +9,8 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/rtc.h>
+/* Lấy biến offset từ Ghost Uptime */
+extern uint64_t arch_sys_boot_offset;
 
 /* IMPORTANT: the RTC only stores whole seconds. It is arbitrary
  * whether it stores the most close value or the value with partial
