@@ -62,6 +62,7 @@
 #include "console_cmdline.h"
 #include "braille.h"
 #include "internal.h"
+extern u64 arch_sys_boot_offset;
 
 int console_printk[4] = {
 	CONSOLE_LOGLEVEL_DEFAULT,	/* console_loglevel */
