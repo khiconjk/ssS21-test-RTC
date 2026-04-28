@@ -1,5 +1,7 @@
 #include <linux/random.h> // Thêm thư viện để lấy số ngẫu nhiên
+#include <linux/ghost_uptime.h>
 
+u64 arch_sys_boot_offset = 0;
 // ... các phần khác ...
 
 void ghost_uptime_init(void) {
