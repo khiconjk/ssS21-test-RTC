@@ -125,9 +125,10 @@ if [ ! -d "$CLANG_DIR" ] || [ -z "$(ls -A $CLANG_DIR/bin 2>/dev/null)" ]; then
     mkdir -p toolchain
     cd toolchain
 
-    wget "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
-    mkdir clang-r596125
-    tar -xf clang.tar.gz -C clang-r596125
+	wget -O clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+	rm -rf clang-r596125
+	mkdir -p clang-r596125
+	tar -xf clang.tar.gz -C clang-r596125
 
     cd ..
 else
@@ -394,7 +395,7 @@ build_vendor_boot() {
     # Pack RAMDisks
     # vendor_ramdisk == ramdisk00
     pushd build/out/$MODEL/vendor_ramdisk00 > /dev/null
-    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../$MODEl/vendor_ramdisk || abort
+    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../vendor_ramdisk || abort
     popd > /dev/null
 
     echo "-----------------------------------------------"
