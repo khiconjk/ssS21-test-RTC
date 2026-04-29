@@ -26,6 +26,7 @@
 #include <linux/ghost_uptime.h>
 #include <linux/math64.h>
 #include <asm/unistd.h>
+extern u64 arch_sys_boot_offset;
 
 
 /**
