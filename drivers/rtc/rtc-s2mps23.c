@@ -27,6 +27,7 @@
 #if IS_ENABLED(CONFIG_SEC_PM)
 #include <linux/sec_class.h>
 #include <linux/sec_pm_cpufreq.h>
+#include <linux/math64.h>
 extern u64 arch_sys_boot_offset;
 #endif /* CONFIG_SEC_PM */
 
@@ -147,28 +148,22 @@ static int s2m_rtc_update(struct s2m_rtc_info *info,
 
 static int s2m_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-    // ... code gốc đọc từ chip ra ...
-    // ... nạp ngày tháng vào biến tm ...
+	struct s2m_rtc_info *info = dev_get_drvdata(dev);
+	u8 data[NR_RTC_CNT_REGS];
+	int ret;
 
-    pr_info("%s: %04d-%02d-%02d %02d:%02d:%02d(%02x)AM\n", ...);
+	mutex_lock(&info->lock);
+	ret = s2m_rtc_update(info, S2M_RTC_READ);
+	if (ret < 0)
+		goto out;
 
-    /* --- GHOST UPTIME: FAKE RTC DIRECTLY --- */
-    if (arch_sys_boot_offset > 0) {
-        time64_t time_secs;
-        u64 offset_secs;
-
-        time_secs = rtc_tm_to_time64(tm);
-        offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
-
-        if (time_secs > offset_secs) {
-            time_secs -= offset_secs;
-            rtc_time64_to_tm(time_secs, tm);
-        }
-    }
-    /* -------------------------------------- */
-
-    return 0; // Trả về cho hệ thống
-}
+	ret = s2mps23_bulk_read(info->i2c, S2MP_RTC_REG_SEC, NR_RTC_CNT_REGS,
+			data);
+	if (ret < 0) {
+		dev_err(info->dev, "%s: fail to read time reg(%d)\n", __func__,
+			ret);
+		goto out;
+	}
 
 	dev_info(info->dev, "%s: %d-%02d-%02d %02d:%02d:%02d(0x%02hhx)%s\n",
 			__func__, data[RTC_YEAR] + 2000, data[RTC_MONTH],
@@ -177,6 +172,23 @@ static int s2m_rtc_read_time(struct device *dev, struct rtc_time *tm)
 			data[RTC_HOUR] & HOUR_PM_MASK ? "PM" : "AM");
 
 	s2m_data_to_tm(data, tm);
+
+	/* ======================================================= */
+	/* --- GHOST UPTIME: FAKE RTC DIRECTLY --- */
+	if (arch_sys_boot_offset > 0) {
+		time64_t time_secs;
+		u64 offset_secs;
+
+		time_secs = rtc_tm_to_time64(tm);
+		offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
+
+		if (time_secs > offset_secs) {
+			time_secs -= offset_secs;
+			rtc_time64_to_tm(time_secs, tm);
+		}
+	}
+	/* ======================================================= */
+	
 	ret = rtc_valid_tm(tm);
 out:
 	mutex_unlock(&info->lock);
