@@ -34,6 +34,7 @@
 #include "timekeeping.h"
 #include "posix-timers.h"
 #include <linux/math64.h>
+extern u64 arch_sys_boot_offset;
 /*
  * Management arrays for POSIX timers. Timers are now kept in static hash table
  * with 512 entries.
@@ -1070,6 +1071,21 @@ _gettime, const clockid_t, which_clock,
 
 	error = kc->clock_get(which_clock, &kernel_tp);
 
+/*==================================================*/
+	if (!error && arch_sys_boot_offset > 0) {
+		if (which_clock == CLOCK_BOOTTIME ||
+		    which_clock == CLOCK_MONOTONIC ||
+		    which_clock == CLOCK_BOOTTIME_ALARM ||
+		    which_clock == CLOCK_MONOTONIC_RAW ||
+		    which_clock == CLOCK_MONOTONIC_COARSE) {
+			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
+
+			kernel_tp.tv_sec += offset_secs;
+		}
+	}
+
+/*==================================================*/
+
 	if (!error && put_timespec64(&kernel_tp, tp))
 		error = -EFAULT;
 
@@ -1152,20 +1168,17 @@ SYSCALL_DEFINE2(clock_gettime32, clockid_t, which_clock,
 
 	err = kc->clock_get(which_clock, &ts);
 
-/* ========================================================== */
-	/* --- GHOST UPTIME: PERFECT SYNC CHO ANTI-CHEAT BYPASS --- */
-	if (!error && arch_sys_boot_offset > 0) {
-		if (which_clock == CLOCK_BOOTTIME || 
+	if (!err && arch_sys_boot_offset > 0) {
+		if (which_clock == CLOCK_BOOTTIME ||
 		    which_clock == CLOCK_MONOTONIC ||
 		    which_clock == CLOCK_BOOTTIME_ALARM ||
 		    which_clock == CLOCK_MONOTONIC_RAW ||
 		    which_clock == CLOCK_MONOTONIC_COARSE) {
-			
 			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
-			kernel_tp.tv_sec += offset_secs;
+
+			ts.tv_sec += offset_secs;
 		}
 	}
-	/* ========================================================== */
 
 	if (!err && put_old_timespec32(&ts, tp))
 		err = -EFAULT;
@@ -1202,21 +1215,6 @@ SYSCALL_DEFINE2(clock_getres_time32, clockid_t, which_clock,
 		return -EINVAL;
 
 	err = kc->clock_getres(which_clock, &ts);
-
-/* ========================================================== */
-	/* --- GHOST UPTIME: ĐỒNG BỘ CHO APP 32-BIT --- */
-	if (!err && arch_sys_boot_offset > 0) {
-		if (which_clock == CLOCK_BOOTTIME || 
-		    which_clock == CLOCK_MONOTONIC ||
-		    which_clock == CLOCK_BOOTTIME_ALARM ||
-		    which_clock == CLOCK_MONOTONIC_RAW ||
-		    which_clock == CLOCK_MONOTONIC_COARSE) {
-			
-			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
-			ts.tv_sec += offset_secs;
-		}
-	}
-	/* ========================================================== */
 
 
 	if (!err && tp && put_old_timespec32(&ts, tp))
