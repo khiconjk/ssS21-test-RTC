@@ -342,6 +342,9 @@ out:
 #endif /* !CONFIG_COMPAT_VDSO */
 
 int aarch32_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
+/* --- GHOST UPTIME: TẮT VDSO ĐỂ ÉP APP GỌI SYSCALL --- */
+	return 0;
+/* ---------------------------------------------------- */
 {
 	struct mm_struct *mm = current->mm;
 	int ret;
