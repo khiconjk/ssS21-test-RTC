@@ -74,14 +74,374 @@ sed -i '/stat->blocks = inode->i_blocks;/a \
 
 fi
 
+touch .scmversion
+export LOCALVERSION="-22936777-abG991BXXS3BUL1"
+export KBUILD_BUILD_USER="dpi"
+export KBUILD_BUILD_HOST="21DJ6C20"
+export KBUILD_BUILD_TIMESTAMP="Tue Nov 30 18:48:28 KST 2021"
+export KBUILD_BUILD_VERSION="2"
+
 # ================= BUILD =================
-echo "Building kernel..."
+# Define specific variables
+case $MODEL in
+r9s)
+    BOARD=SRPUG16A010KU
+;;
+o1s)
+    BOARD=SRPTH19C011KU
+;;
+t2s)
+    BOARD=SRPTG24B014KU
+;;
+p3s)
+    BOARD=SRPTH19D013KU
+;;
+*)
+    unset_flags
+    exit
+esac
 
-make ${MAKE_ARGS} exynos2100_defconfig o1s.config || abort
-make ${MAKE_ARGS} -j$CORES || abort
+if [[ "$RECOVERY_OPTION" == "y" ]]; then
+    RECOVERY=recovery.config
+    KSU_OPTION=n
+    SUSFS_OPTION=n
+fi
 
-# ================= OUTPUT =================
-mkdir -p build/out/o1s
-cp out/arch/arm64/boot/Image build/out/o1s/
+if [ -z $KSU_OPTION ]; then
+    read -p "Include KernelSU (y/N): " KSU_OPTION
+fi
 
-echo "BUILD SUCCESS"
+if [[ "$KSU_OPTION" == "y" ]]; then
+    KSU=ksu.config
+fi
+
+if [[ "$SUSFS_OPTION" == "y" ]]; then
+    SUSFS=susfs.config
+fi
+
+rm -rf build/out/$MODEL
+mkdir -p build/out/$MODEL/zip/files
+mkdir -p build/out/$MODEL/zip/META-INF/com/google/android
+
+build_kernel() {
+    # Build kernel image
+    echo "-----------------------------------------------"
+    echo "Defconfig: "$KERNEL_DEFCONFIG""
+
+    if [[ "$RECOVERY_OPTION" == "y" ]]; then
+        RECOVERY=recovery.config
+        KSU_OPTION=n
+        SUSFS_OPTION=n
+    fi
+    if [ -z "$KSU" ]; then
+        echo "KSU: N"
+    else
+        echo "KSU: $KSU"
+    fi
+    if [ -z "$SUSFS" ]; then
+        echo "SUSFS: N"
+    else
+        echo "SUSFS: $SUSFS"
+    fi
+    if [ -z "$RECOVERY" ]; then
+    echo "Recovery: N"
+    else
+        echo "Recovery: Y"
+    fi
+
+    echo "-----------------------------------------------"
+    echo "Building kernel using "$KERNEL_DEFCONFIG""
+    echo "Generating configuration file..."
+    echo "-----------------------------------------------"
+    make ${MAKE_ARGS} -j$CORES exynos2100_defconfig $MODEL.config $RECOVERY $KSU $SUSFS || abort
+
+    echo "Building kernel..."
+    echo "-----------------------------------------------"
+    make ${MAKE_ARGS} -j$CORES || abort
+}
+
+build_boot() {
+
+    cp -a out/arch/arm64/boot/Image build/out/$MODEL
+
+    if [ -z "$RECOVERY" ]; then			   
+    echo "-----------------------------------------------"
+    echo "Building boot.img RAMDisk..."
+    mkdir -p build/out/$MODEL/boot_ramdisk00
+
+    # Copy common files for boot.img's RAMDisk
+    cp -a build/ramdisk/boot/boot_ramdisk00 build/out/$MODEL
+
+    pushd build/out/$MODEL/boot_ramdisk00 > /dev/null
+    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | lz4 -l > ../boot_ramdisk || abort
+    popd > /dev/null
+
+    echo "-----------------------------------------------"
+    echo "Building boot.img..."
+
+    OUTPUT_FILE=build/out/$MODEL/boot.img
+    RAMDISK_00=build/out/$MODEL/boot_ramdisk
+    KERNEL=build/out/$MODEL/Image
+    HEADER_VERSION=3
+    OS_VERSION=16.0.0
+    OS_PATCH_LEVEL=2025-11
+    CMDLINE="androidboot.selinux=permissive loop.max_part=7"
+
+	python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --cmdline "$CMDLINE" --ramdisk $RAMDISK_00 \
+	--os_version $OS_VERSION --os_patch_level $OS_PATCH_LEVEL --kernel $KERNEL --output $OUTPUT_FILE || abort
+	fi  
+}
+
+build_dtb() {
+    echo "-----------------------------------------------"
+    echo "Building DTB image..."
+    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtb.img dt.configs/exynos2100.cfg -d out/arch/arm64/boot/dts/exynos || abort 
+
+    echo "-----------------------------------------------"
+    echo "Building DTBO image..."
+    ./toolchain/mkdtimg cfg_create build/out/$MODEL/dtbo.img dt.configs/$MODEL.cfg -d out/arch/arm64/boot/dts/samsung/$MODEL || abort
+    
+}
+
+build_modules() {
+    MODULES_FOLDER=modules
+    rm -rf out/$MODULES_FOLDER
+
+    echo "-----------------------------------------------"
+    echo "Building modules..."
+    # Strip modules and place them in modules folder
+    make ${MAKE_ARGS} INSTALL_MOD_PATH=$MODULES_FOLDER INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
+
+    # List of kernel modules to remove
+    # Some of the kernel modules are in /vendor_dlkm or /vendor/lib/modules and not in vendor_boot
+    # So we will remove them from the folder and run depmod again to update the files
+    FILENAMES="
+    sec_debug_sched_info.ko
+    "
+    for FILENAME in $FILENAMES; do
+        FILE=$(find out/$MODULES_FOLDER -type f -name "$FILENAME")
+        echo "$FILE" | xargs rm -f
+    done
+
+    # Now we run depmod to update the dep/softdep files
+    # For this we need the kernel version
+    KERNEL_DIR_PATH=$(find "out/$MODULES_FOLDER/lib/modules" -maxdepth 1 -type d -name "5.4*") || abort
+    KERNEL_VERSION=$(basename $KERNEL_DIR_PATH) || abort
+
+    # And finally depmod itself
+    depmod -a -b out/$MODULES_FOLDER $KERNEL_VERSION || abort
+
+    # depmod updates modules.alias, modules.dep and modules.softdep
+    # But the module order is not updated by depmod
+    # We have to remove the filenames ourselves
+    # But first, our vendor_boot needs modules.order definitions that go like:
+    # fingerprint.ko
+    # Clang generates modules.order definitions like this
+    # kernel/drivers/fingerprint/fingerprint.ko
+    # So we sed the file to adapt
+    sed -i 's/.*\///g' $KERNEL_DIR_PATH/modules.order 
+
+    # Now we sed the bad filenames out of the file with a loop
+    for FILENAME in $FILENAMES; do
+        sed -i "/$FILENAME/d" "$KERNEL_DIR_PATH/modules.order"
+    done
+
+    # Now we have to order the modules
+    # These files have to be at the top of modules.order in this order, and then we can keep the default order.
+    # Samsung wants the file to be renamed to modules.load anyways, so we will craft our own modules.load file based on modules.order
+    touch $KERNEL_DIR_PATH/modules.load
+
+    INITIAL_ORDER="
+    dss.ko
+    exynos-chipid_v2.ko
+    exynos-reboot.ko
+    exynos2100-itmon.ko
+    exynos-pmu-if.ko
+    s3c2410_wdt.ko
+    exynos-ecc-handler.ko
+    debug-snapshot-qd.ko
+    eat.ko
+    exynos-adv-tracer-s2d.ko
+    ehld.ko
+    exynos-debug-test.ko
+    hardlockup-debug.ko
+    exynos_acpm.ko
+    exynos_pm_qos.ko
+    exynos-s2mpu.ko
+    exynos-pd_el3.ko
+    ect_parser.ko
+    cmupmucal.ko
+    clk_exynos.ko
+    clk-exynos-audss.ko
+    exynos_mct.ko
+    pinctrl-samsung-core.ko
+    exynos-cpupm.ko
+    i2c-exynos5.ko
+    acpm-mfd-bus.ko
+    s2mps24_mfd.ko
+    s2mps23_mfd.ko
+    pmic_class.ko
+    s2mps23-regulator.ko
+    s2mps24-regulator.ko
+    phy-exynos-usbdrd-super.ko
+    sec_debug_mode.ko
+    fingerprint.ko
+    "
+
+    # First we add the order from Samsung into our new modules.load
+    # And we sed it out of modules.order
+    for LINE in $INITIAL_ORDER; do
+        echo $LINE >> $KERNEL_DIR_PATH/modules.load
+        sed -i "/$LINE/d" "$KERNEL_DIR_PATH/modules.order"
+    done
+
+    # Now we add the remaining lines from modules.order into modules.load
+    while IFS= read -r line; do
+        echo "$line" >> "$KERNEL_DIR_PATH/modules.load"
+    done < "$KERNEL_DIR_PATH/modules.order"
+
+    # Now we have to also modify modules.dep
+    # Android generates them like this
+    # kernel/drivers/dma/samsung-dma.ko: kernel/drivers/dma/pl330.ko
+    # But Samsung wants them like this
+    # /lib/modules/samsung-dma.ko: /lib/modules/pl330.ko
+    # So we will format it with sed
+    sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$KERNEL_DIR_PATH/modules.dep"
+
+    # Now the modules and their configuration descriptor files are ready, we move them to a folder and create the new second ramdisk
+    # The second ramdisk should contain a /lib/modules where the modules are located
+    mkdir -p build/out/$MODEL/modules/lib/modules
+
+    find $KERNEL_DIR_PATH -name '*.ko' -exec cp '{}' build/out/$MODEL/modules/lib/modules ';'
+
+    # We also copy the module configuration descriptors
+    cp $KERNEL_DIR_PATH/modules.{alias,dep,softdep,load} build/out/$MODEL/modules/lib/modules
+}
+
+build_vendor_boot() {
+    echo "-----------------------------------------------"
+    echo "Building vendor_boot RAMDisks..."
+    # Copy common vendor_ramdisk00 files to build/out
+    cp -a build/ramdisk/vendor_boot/ramdisk00 build/out/$MODEL/vendor_ramdisk00
+
+    # Copy module files for vendor_ramdisk00
+    cp -a build/out/$MODEL/modules/lib/* build/out/$MODEL/vendor_ramdisk00/lib
+
+    # Copy device firmware files for vendor_ramdisk00
+    cp -a build/ramdisk/vendor_boot/vendor_firmware/$MODEL/* build/out/$MODEL/vendor_ramdisk00
+
+    # Pack RAMDisks
+    # vendor_ramdisk == ramdisk00
+    pushd build/out/$MODEL/vendor_ramdisk00 > /dev/null
+    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip -c > ../$MODEl/vendor_ramdisk || abort
+    popd > /dev/null
+
+    echo "-----------------------------------------------"
+    echo "Building vendor_boot image..."
+
+    OUTPUT_FILE=build/out/$MODEL/vendor_boot.img
+    DTB_PATH=build/out/$MODEL/dtb.img
+    RAMDISK_00=build/out/$MODEL/vendor_ramdisk
+    HEADER_VERSION=3
+    BASE=0x00000000
+    PAGESIZE=0x00001000
+    KERNEL_OFFSET=0x80008000
+    RAMDISK_OFFSET=0x84000000
+    TAGS_OFFSET=0x80000000
+    DTB_OFFSET=0x0000000081F00000
+    CMDLINE="androidboot.selinux=permissive loop.max_part=7"
+
+    python3 toolchain/mkbootimg/mkbootimg.py --header_version $HEADER_VERSION --pagesize $PAGESIZE --base $BASE --kernel_offset $KERNEL_OFFSET \
+	--ramdisk_offset $RAMDISK_OFFSET --tags_offset $TAGS_OFFSET --dtb_offset $DTB_OFFSET --vendor_cmdline "$CMDLINE" --board $BOARD --dtb $DTB_PATH  \
+	--vendor_ramdisk $RAMDISK_00 --vendor_boot $OUTPUT_FILE || abort
+}
+
+build_zip() {
+    echo "-----------------------------------------------"
+    echo "Building AK3 zip..."
+    echo "-----------------------------------------------"
+
+    AK3_DIR="$PWD/AnyKernel3"
+    AK3_REPO="https://github.com/xfwdrev/AnyKernel3.git"
+    AK3_BRANCH="t2s"
+
+    if [ ! -d "$AK3_DIR/.git" ]; then
+        echo "AnyKernel3 not found! Cloning ($AK3_BRANCH branch)..."
+        git clone -b "$AK3_BRANCH" "$AK3_REPO" "$AK3_DIR" || abort
+    else
+        echo "AnyKernel3 exists, updating..."
+        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" checkout "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" reset --hard "origin/$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" clean -fd || abort
+    fi
+
+    rm -f "$AK3_DIR/boot.img"
+    rm -f "$AK3_DIR/vendor_boot.img"
+    rm -f "$AK3_DIR/dtbo.img"
+
+    [ -f build/out/$MODEL/boot.img ] && cp build/out/$MODEL/boot.img "$AK3_DIR/"
+    [ -f build/out/$MODEL/dtbo.img ] && cp build/out/$MODEL/dtbo.img "$AK3_DIR/"
+    [ -f build/out/$MODEL/vendor_boot.img ] && cp build/out/$MODEL/vendor_boot.img "$AK3_DIR/"
+
+    [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$AK3_DIR/anykernel.sh"
+
+    pushd "$AK3_DIR" > /dev/null
+
+    version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
+    version=${version:1}
+    DATE=`date +"%d-%m-%Y_%H-%M-%S"`
+
+    if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
+        NAME="${version}_${MODEL}_KSUN_SUSFS_OFFICIAL_${DATE}.zip"
+    elif [[ "$KSU_OPTION" == "y" ]]; then
+        NAME="${version}_${MODEL}_KSUN_OFFICIAL_${DATE}.zip"
+    else
+        NAME="${version}_${MODEL}_VANILLA_OFFICIAL_${DATE}.zip"
+    fi
+    zip -r9 "../build/out/$MODEL/$NAME" * -x ".git*" "README.md" "*placeholder" || abort
+    popd > /dev/null
+}
+
+KCONFIG_FILE="drivers/Kconfig"
+KSU='source "drivers/kernelsu/Kconfig"'
+MAKEFILE="drivers/Makefile"
+MAKEFILE_LINE='obj-$(CONFIG_KSU) += kernelsu/'
+
+if [[ "$KSU_OPTION" == "y" ]]; then
+
+    fetch_ksu
+
+    if [[ "$SUSFS_OPTION" == "y" ]]; then
+    enable_susfs
+    fi
+
+    if ! grep -Fxq "$KSU" "$KCONFIG_FILE"; then
+        sed -i "\|endmenu|i $KSU" "$KCONFIG_FILE"
+    fi
+
+    if ! grep -Fxq "$MAKEFILE_LINE" "$MAKEFILE"; then
+        echo "$MAKEFILE_LINE" >> "$MAKEFILE"
+    fi
+
+else
+
+    fetch_ksu
+    
+    sed -i "\|$KSU|d" "$KCONFIG_FILE"
+    sed -i "\|$MAKEFILE_LINE|d" "$MAKEFILE"
+fi
+
+build_kernel
+build_boot
+build_dtb
+build_modules
+
+if [ -z "$RECOVERY" ]; then				   
+build_vendor_boot
+build_zip
+fi 
+
+popd > /dev/null
+echo "-----------------------------------------------"
+echo "Build finished successfully!"
