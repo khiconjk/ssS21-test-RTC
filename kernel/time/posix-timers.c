@@ -33,7 +33,7 @@
 
 #include "timekeeping.h"
 #include "posix-timers.h"
-
+#include <linux/math64.h>
 /*
  * Management arrays for POSIX timers. Timers are now kept in static hash table
  * with 512 entries.
@@ -1043,7 +1043,7 @@ void exit_itimers(struct signal_struct *sig)
 	}
 }
 
-SYSCALL_DEFINE2(clock_settime, const clockid_t, which_clock,
+_settime, const clockid_t, which_clock,
 		const struct __kernel_timespec __user *, tp)
 {
 	const struct k_clock *kc = clockid_to_kclock(which_clock);
@@ -1058,7 +1058,7 @@ SYSCALL_DEFINE2(clock_settime, const clockid_t, which_clock,
 	return kc->clock_set(which_clock, &new_tp);
 }
 
-SYSCALL_DEFINE2(clock_gettime, const clockid_t, which_clock,
+_gettime, const clockid_t, which_clock,
 		struct __kernel_timespec __user *, tp)
 {
 	const struct k_clock *kc = clockid_to_kclock(which_clock);
@@ -1088,7 +1088,7 @@ int do_clock_adjtime(const clockid_t which_clock, struct __kernel_timex * ktx)
 	return kc->clock_adj(which_clock, ktx);
 }
 
-SYSCALL_DEFINE2(clock_adjtime, const clockid_t, which_clock,
+_adjtime, const clockid_t, which_clock,
 		struct __kernel_timex __user *, utx)
 {
 	struct __kernel_timex ktx;
@@ -1152,6 +1152,21 @@ SYSCALL_DEFINE2(clock_gettime32, clockid_t, which_clock,
 
 	err = kc->clock_get(which_clock, &ts);
 
+/* ========================================================== */
+	/* --- GHOST UPTIME: PERFECT SYNC CHO ANTI-CHEAT BYPASS --- */
+	if (!error && arch_sys_boot_offset > 0) {
+		if (which_clock == CLOCK_BOOTTIME || 
+		    which_clock == CLOCK_MONOTONIC ||
+		    which_clock == CLOCK_BOOTTIME_ALARM ||
+		    which_clock == CLOCK_MONOTONIC_RAW ||
+		    which_clock == CLOCK_MONOTONIC_COARSE) {
+			
+			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
+			kernel_tp.tv_sec += offset_secs;
+		}
+	}
+	/* ========================================================== */
+
 	if (!err && put_old_timespec32(&ts, tp))
 		err = -EFAULT;
 
@@ -1187,6 +1202,23 @@ SYSCALL_DEFINE2(clock_getres_time32, clockid_t, which_clock,
 		return -EINVAL;
 
 	err = kc->clock_getres(which_clock, &ts);
+
+/* ========================================================== */
+	/* --- GHOST UPTIME: ĐỒNG BỘ CHO APP 32-BIT --- */
+	if (!err && arch_sys_boot_offset > 0) {
+		if (which_clock == CLOCK_BOOTTIME || 
+		    which_clock == CLOCK_MONOTONIC ||
+		    which_clock == CLOCK_BOOTTIME_ALARM ||
+		    which_clock == CLOCK_MONOTONIC_RAW ||
+		    which_clock == CLOCK_MONOTONIC_COARSE) {
+			
+			u64 offset_secs = div_u64(arch_sys_boot_offset, 1000000000);
+			ts.tv_sec += offset_secs;
+		}
+	}
+	/* ========================================================== */
+
+
 	if (!err && tp && put_old_timespec32(&ts, tp))
 		return -EFAULT;
 
