@@ -41,7 +41,7 @@ int rtc_hctosys(void)
 
 	err = rtc_read_time(rtc, &tm);
 	if (!err) {
-		rtc_tm_to_time64(&tm, &tv64.tv_sec);
+		tv64.tv_sec = rtc_tm_to_time64(&tm);
         
 		/* --- ĐỒNG BỘ RTC VỚI GHOST UPTIME OFFSET --- */
 		// Nếu biến tính bằng Nanosecond (chuẩn của Ghost Uptime):
