@@ -1538,6 +1538,7 @@ static bool persistent_clock_exists;
 
 /* --- GHOST UPTIME GLOBAL VARIABLE --- */
 u64 arch_sys_boot_offset = 0;
+EXPORT_SYMBOL_GPL(arch_sys_boot_offset);
 
 /*
  * timekeeping_init - Initializes the clocksource and common timekeeping values
