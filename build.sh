@@ -2,21 +2,16 @@
 set -e
 
 abort() {
-    cd - 2>/dev/null || true
-    echo "-----------------------------------------------"
-    echo "Kernel compilation failed! Exiting..."
-    echo "-----------------------------------------------"
+    echo "BUILD FAILED"
     exit 1
 }
 
-echo "Preparing the build environment..."
 cd "$(dirname "$0")"
 
 CORES=$(nproc)
 
-# ================= CLEAN =================
-echo "Cleaning old build..."
-rm -rf out
+echo "Cleaning..."
+rm -rf out build
 find . -name "*.a" -delete
 
 # ================= TOOLCHAIN =================
@@ -25,7 +20,6 @@ export PATH=$CLANG_DIR/bin:$PATH
 
 if [ ! -x "$CLANG_DIR/bin/clang" ]; then
     echo "Downloading clang..."
-    rm -rf toolchain/clang-r596125
     mkdir -p toolchain/clang-r596125
 
     wget -O toolchain/clang.tar.gz \
@@ -34,7 +28,6 @@ if [ ! -x "$CLANG_DIR/bin/clang" ]; then
     tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
 fi
 
-# ================= BUILD FLAGS =================
 MAKE_ARGS="
 LLVM=1
 LLVM_IAS=1
@@ -42,20 +35,17 @@ ARCH=arm64
 O=out
 "
 
-# ================= GHOST UPTIME =================
-echo "Setting up ghost uptime..."
+MODEL=o1s
 
+# ================= GHOST UPTIME =================
 mkdir -p include/linux
 mkdir -p kernel
 
 cat > include/linux/ghost_uptime.h <<'EOF'
 #ifndef _LINUX_GHOST_UPTIME_H
 #define _LINUX_GHOST_UPTIME_H
-
 #include <linux/types.h>
-
 extern u64 arch_sys_boot_offset;
-
 #endif
 EOF
 
@@ -70,7 +60,6 @@ u64 arch_sys_boot_offset = 0;
 void ghost_uptime_init(void)
 {
     u32 random_days;
-
     get_random_bytes(&random_days, sizeof(random_days));
     random_days = 15 + (random_days % 6);
 
@@ -86,14 +75,9 @@ static int __init ghost_uptime_module_init(void)
 early_initcall(ghost_uptime_module_init);
 EOF
 
-# ensure Makefile
-if ! grep -q "ghost_uptime.o" kernel/Makefile; then
-    echo "obj-y += ghost_uptime.o" >> kernel/Makefile
-fi
+grep -q ghost_uptime.o kernel/Makefile || echo "obj-y += ghost_uptime.o" >> kernel/Makefile
 
 # ================= PATCH STAT =================
-echo "Patching fs/stat.c..."
-
 if ! grep -q "GHOST UPTIME FOR STAT" fs/stat.c; then
 
 sed -i '/#include <linux\/uaccess.h>/a \
@@ -120,12 +104,11 @@ fi
 # ================= BUILD =================
 echo "Building kernel..."
 
-make ${MAKE_ARGS} exynos2100_defconfig || abort
+make ${MAKE_ARGS} exynos2100_defconfig o1s.config || abort
 make ${MAKE_ARGS} -j$CORES || abort
 
 # ================= OUTPUT =================
 mkdir -p build/out/o1s
 cp out/arch/arm64/boot/Image build/out/o1s/
 
-echo "-----------------------------------------------"
 echo "BUILD SUCCESS"
