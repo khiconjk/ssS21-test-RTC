@@ -152,21 +152,7 @@ if [[ "$SUSFS_OPTION" == "y" ]]; then
     SUSFS=susfs.config
 fi
 
-# ==================== GHOST UPTIME CORE ====================
-echo "=== Preparing Ghost Uptime Core ==="
 
-cat > include/linux/ghost_uptime.h << 'EOF'
-#ifndef _LINUX_GHOST_UPTIME_H
-#define _LINUX_GHOST_UPTIME_H
-
-#include <linux/types.h>
-
-extern u64 arch_sys_boot_offset;
-
-#endif
-EOF
-
-cat > kernel/ghost_uptime.c << 'EOF'
 #include <linux/types.h>
 #include <linux/random.h>
 #include <linux/init.h>
