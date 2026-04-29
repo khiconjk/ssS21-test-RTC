@@ -226,7 +226,6 @@ cat > patches/uptime/0002-fake-stat-timestamps.patch << 'EOF'
  #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
  	susfs_generic_fillattr_spoofer(inode, stat);
  #endif
-EOF
 
 if grep -q "GHOST UPTIME FOR STAT" fs/stat.c; then
     echo "→ Patch stat.c already applied"
