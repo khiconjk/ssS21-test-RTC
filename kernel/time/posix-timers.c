@@ -1044,7 +1044,7 @@ void exit_itimers(struct signal_struct *sig)
 	}
 }
 
-_settime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_settime, const clockid_t, which_clock,
 		const struct __kernel_timespec __user *, tp)
 {
 	const struct k_clock *kc = clockid_to_kclock(which_clock);
@@ -1059,7 +1059,7 @@ _settime, const clockid_t, which_clock,
 	return kc->clock_set(which_clock, &new_tp);
 }
 
-_gettime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_gettime, const clockid_t, which_clock,
 		struct __kernel_timespec __user *, tp)
 {
 	const struct k_clock *kc = clockid_to_kclock(which_clock);
@@ -1104,7 +1104,7 @@ int do_clock_adjtime(const clockid_t which_clock, struct __kernel_timex * ktx)
 	return kc->clock_adj(which_clock, ktx);
 }
 
-_adjtime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_adjtime, const clockid_t, which_clock,
 		struct __kernel_timex __user *, utx)
 {
 	struct __kernel_timex ktx;
