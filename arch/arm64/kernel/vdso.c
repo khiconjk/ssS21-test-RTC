@@ -405,7 +405,6 @@ arch_initcall(vdso_init);
 int arch_setup_additional_pages(struct linux_binprm *bprm,
 				int uses_interp)
 {
-	return 0;
 	struct mm_struct *mm = current->mm;
 	int ret;
 
