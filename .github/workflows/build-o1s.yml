@@ -89,7 +89,7 @@ jobs:
 
       - name: Build kernel
         run: |
-          bash build.sh -m o1s -k n -s n -r n 2>&1 | tee build.log
+          bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
       - name: Show outputs
         if: always()
