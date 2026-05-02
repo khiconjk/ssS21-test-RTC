@@ -354,12 +354,13 @@ int aarch32_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 		goto out;
 
 #ifdef CONFIG_COMPAT_VDSO
-	/* Disable compat VDSO32 mapping, keep kuser helpers */
-	ret = 0;
+	ret = __setup_additional_pages(ARM64_VDSO32,
+				       mm,
+				       bprm,
+				       uses_interp);
 #else
-	/* No compat VDSO: keep sigreturn page for 32-bit ABI */
 	ret = aarch32_sigreturn_setup(mm);
-#endif
+#endif /* CONFIG_COMPAT_VDSO */
 
 out:
 	up_write(&mm->mmap_sem);
@@ -403,9 +404,7 @@ arch_initcall(vdso_init);
 int arch_setup_additional_pages(struct linux_binprm *bprm,
 				int uses_interp)
 {
-	/* Disable VDSO mapping globally */
-	return 0;
-	/* struct mm_struct *mm = current->mm;
+	struct mm_struct *mm = current->mm;
 	int ret;
 
 	if (down_write_killable(&mm->mmap_sem))
@@ -418,5 +417,5 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 
 	up_write(&mm->mmap_sem);
 
-	return ret; */
+	return ret;
 }
